@@ -1,52 +1,14 @@
 
-
-typedef
-struct Muxframe
-{
-	uint magic;
-
-	uint n;
-	uchar buf[];
-} Muxframe;
-
-typedef
-struct Muxmsg
-{
-	uint magic;
-
-	/* header: */
-	uint type;
-	uint32 tag;
-
-	/* body: */
-	uint n;
-	uchar buf[];
-} Muxmsg;
+#include <mux.h>
 
 enum
 {
-	/* Application messages */
-	Treq = 1,
-	Rreq = -1,
-
-	Tdispatch = 2,
-	Rdispatch = -2,
-
-	/* Control messages */
-	Tdrain = 64,
-	Rdrain = -64,
-	Tping = 65,
-	Rping = -63,
-	
-	Tdiscarded = -62,
-	Tlease = -61,
-	
-	/* Could be either */
-	Rerr = 127,
-	
-	Unknown = 0
+  FRAME_SUCCESS = 0,
+  FRAME_FAILURE_EOF = -1
 };
 
-Muxframe* muxreadframe(int fd);
-Muxmsg* muxF2M(Muxframe* f);
-Muxframe* muxM2F(Muxmsg *m);
+/**
+ * Either successfully completes the given mux_frame_t from the given fd, or returns a
+ * negative error code indicating that the frame is incomplete, and fd is unusable.
+ */
+int muxreadframe(mux_frame_t* frame, int fd);
