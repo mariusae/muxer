@@ -4,7 +4,7 @@ CFLAGS =  -g -Ilibtask
 
 all: muxer
 
-OFILES=u.o mux.o
+OFILES=u.o muxtask.o
 LIB=libtask/libtask.a
 
 libtask/libtask.a:
