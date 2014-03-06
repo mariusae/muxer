@@ -1,5 +1,6 @@
 #include "a.h"
 #include "muxtask.h"
+#include <mux.h>
 #include <task.h>
 
 /* XXX very leaky! */
@@ -118,13 +119,15 @@ brokertask(void *v)
 	Session *sessions[Maxsessions];
 	Session *pending[Maxtags];
 	int tagmap[Maxtags];
-	Muxframe *f;
-	Muxmsg *m;
+	mux_frame_t *f;
+	mux_msg_t *m;
+	int decode_result;
 	void *p, **args;
 	Session *s;
 
 	void **argv = v;
 
+	m = emalloc(sizeof(mux_msg_t));
 	ds = argv[0];
 	nc = argv[1];
 	free(p);
@@ -153,17 +156,24 @@ brokertask(void *v)
 
 		switch((i = chanalt(alts))){
 		case 0:
-			m = muxF2M(f);
+			decode_result = mux_msg_decode(m, f);
+			// TODO: cannot free the frame here because it is shared with the message
 			free(f);
 
-			if(m == nil || m->tag == 0)
+			if(decode_result < 0){
+				if(debug)
+					fprintf(stderr, "[%s] decode failed: %s\n", ds->label, m->msg.exception);
 				continue;
+			}
+			if(m->tag == 0){
+				// marker message
+				continue;
+			}
 
 			s = pending[m->tag];
 			if(s==nil){
 				if(debug)
 					fprintf(stderr, "[%s] unknown tag %d\n", ds->label, m->tag);
-				free(m);
 				continue;
 			}
 			tag = tagmap[m->tag];
@@ -173,9 +183,11 @@ brokertask(void *v)
 
 			tagmap[m->tag] = -1;
 			m->tag = tag;
-			f = muxM2F(m);
+
+			// TODO: reuse frames
+			f = mux_frame_create(128);
+			mux_msg_encode(f, m);
 			chansendp(s->wc, f);
-			free(m);
 
 			continue;
 
@@ -243,7 +255,7 @@ readtask(void *v)
 		int fd;
 		Session *s;
 	void **argv = (void**)v;
-	Muxframe *f;
+	mux_frame_t *f;
 
 	fd = (uintptr)argv[0];
 	s = argv[1];
@@ -251,7 +263,7 @@ readtask(void *v)
 
 	while((f=muxreadframe(fd)) != nil){
 		if(debug)
-			fprintf(stderr, "[%s] R %d \n", s->label, f->n);
+			fprintf(stderr, "[%s] R %d \n", s->label, f->size);
 		chansendp(s->rc, f);
 	}
 
@@ -266,8 +278,7 @@ writetask(void *v)
 		int fd;
 		Session *s;
 	void **argv = (void**)v;
-	Muxframe *f;
-	uchar siz[4];
+	mux_frame_t *f;
 
 	fd = (uintptr)argv[0];
 	s = argv[1];
@@ -275,10 +286,8 @@ writetask(void *v)
 
 	while((f=chanrecvp(s->wc)) != nil){
 		if(debug)
-			fprintf(stderr, "[%s] W %d\n", s->label, f->n);
-		U32PUT(siz, f->n);
-		fdwrite(fd, siz, 4);
-		fdwrite(fd, f->buf, f->n);
+			fprintf(stderr, "[%s] W %d\n", s->label, f->size);
+		fdwrite(fd, f->data, f->size);
 		free(f);
 	}
 

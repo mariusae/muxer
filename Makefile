@@ -1,4 +1,4 @@
-CFLAGS =  -g -Ilibtask -I../libmux
+CFLAGS =  -g -Wall -Wextra -Ilibtask -I../libmux
 
 .PHONY: all
 
