@@ -14,9 +14,11 @@ muxreadframe(int fd)
 	int32_t off = 0;
 	int32_t framed = -(HEADER_SIZE);
 	while (framed < 0) {
+		mux_frame_expand(frame, -framed);
 		if (fdreadn(fd, &frame->data[off], -framed) != -(framed))
 			return nil;
-		frame->size += (-framed);
+		frame->size += -framed;
+		off += -framed;
 		framed = mux_frame_iscomplete(frame);
 	}
 	return frame;

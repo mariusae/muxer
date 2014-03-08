@@ -108,26 +108,107 @@ taskmain(int argc, char **argv)
 	}
 }
 
+/**
+ * Decodes from the given frame into the given message. If the message is decoded
+ * and there is an associated Session, returns the Session; otherwise, frees the
+ * frame and returns nil.
+ */
+Session*
+decode_from_ds(Session* pending[], mux_msg_t* m, mux_frame_t* f, Session* ds)
+{
+	int decode_result;
+	Session *s;
+
+	decode_result = mux_msg_decode(m, f);
+
+	if(decode_result < 0){
+		if(debug)
+			fprintf(stderr, "[%s] decode failed: %s\n", ds->label, m->msg.exception);
+		goto ignore_frame;
+	}
+
+	// marker
+	if(m->tag == 0){
+		goto ignore_msg;
+	}
+
+	s = pending[m->tag];
+	if(s==nil){
+		if(debug)
+			fprintf(stderr, "[%s] unknown tag %d\n", ds->label, m->tag);
+		goto ignore_msg;
+	}
+	return s;
+
+ignore_msg:
+	mux_msg_reset(m);
+	// NB: fallthrough
+ignore_frame:
+	free(f);
+	return nil;
+}
+
+/**
+ * Decodes from the given frame into the given message. If the message was decoded,
+ * returns 0; else, a negative value.
+ */
+int
+decode_from_s(mux_msg_t* m, mux_frame_t* f, Session* s)
+{
+	int decode_result = mux_msg_decode(m, f);
+
+	if(decode_result < 0){
+		if(debug)
+			fprintf(stderr, "[%s] decode failed: %s\n", s->label, m->msg.exception);
+		goto ignore_frame;
+	}
+
+	if(m->tag == 0){
+		goto ignore_msg;
+	}
+
+	return decode_result;
+
+ignore_msg:
+	mux_msg_reset(m);
+	// NB: fallthrough
+ignore_frame:
+	free(f);
+	return decode_result;
+}
+
+/**
+ * Encodes the given msg/frame into a new frame and returns it, then resets/frees
+ * the input msg/frame.
+ */
+mux_frame_t*
+encode(mux_frame_t* frame_in, mux_msg_t* m)
+{
+	mux_frame_t* frame_out = mux_frame_create(128);
+	mux_msg_encode(frame_out, m);
+	mux_msg_reset(m);
+	free(frame_in);
+  return frame_out;
+}
+
 void
 brokertask(void *v)
 {
 	/* args: */
 		Session *ds;
 		Channel *nc;
-	int n = 0, i, tag;
+	unsigned int n = 0, i, tag;
 	Alt alts[Maxsessions+2];
 	Session *sessions[Maxsessions];
 	Session *pending[Maxtags];
 	int tagmap[Maxtags];
 	mux_frame_t *f;
-	mux_msg_t *m;
-	int decode_result;
+	mux_msg_t m;
 	void *p, **args;
 	Session *s;
 
 	void **argv = v;
 
-	m = emalloc(sizeof(mux_msg_t));
 	ds = argv[0];
 	nc = argv[1];
 	free(p);
@@ -156,38 +237,21 @@ brokertask(void *v)
 
 		switch((i = chanalt(alts))){
 		case 0:
-			decode_result = mux_msg_decode(m, f);
-			// TODO: cannot free the frame here because it is shared with the message
-			free(f);
-
-			if(decode_result < 0){
-				if(debug)
-					fprintf(stderr, "[%s] decode failed: %s\n", ds->label, m->msg.exception);
-				continue;
-			}
-			if(m->tag == 0){
-				// marker message
-				continue;
-			}
-
-			s = pending[m->tag];
+			// decode into msg and get associated session
+			s = decode_from_ds(pending, &m, f, ds);
 			if(s==nil){
-				if(debug)
-					fprintf(stderr, "[%s] unknown tag %d\n", ds->label, m->tag);
+				// msg wasn't useful: frame has already been freed
 				continue;
 			}
-			tag = tagmap[m->tag];
+			tag = tagmap[m.tag];
 
 			if(debug)
-				fprintf(stderr, "[%s] tag %d->%d\n", s->label, m->tag, tag);
+				fprintf(stderr, "[%s] tag %d->%d\n", s->label, m.tag, tag);
 
-			tagmap[m->tag] = -1;
-			m->tag = tag;
+			tagmap[m.tag] = -1;
+			m.tag = tag;
 
-			// TODO: reuse frames
-			f = mux_frame_create(128);
-			mux_msg_encode(f, m);
-			chansendp(s->wc, f);
+			chansendp(s->wc, encode(f, &m));
 
 			continue;
 
@@ -204,26 +268,17 @@ brokertask(void *v)
 		if(tag == nelem(tagmap))
 			continue; /* XXX */
 
-		m = muxF2M(f);
-		free(f);
-		if(m == nil)
+		if(decode_from_s(&m, f, s) < 0)
 			continue;
-		if(m->tag == 0){
-			free(m);
-			continue;
-		}
 
 		if(debug)
-			fprintf(stderr, "[%s] tag=%d->%d\n", s->label, m->tag, tag);
+			fprintf(stderr, "[%s] tag=%d->%d\n", s->label, m.tag, tag);
 
-		tagmap[tag] = m->tag;
+		tagmap[tag] = m.tag;
 		pending[tag] = s;
+		m.tag = tag;
 
-		m->tag = tag;
-		f = muxM2F(m);
-		free(m);
-
-		chansendp(ds->wc, f);
+		chansendp(ds->wc, encode(f, &m));
 	}
 }
 
