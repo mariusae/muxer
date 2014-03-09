@@ -12,7 +12,6 @@ enum
 	Maxsessions = 200,
 };
 
-
 typedef
 struct Session
 {
@@ -260,25 +259,25 @@ brokertask(void *v)
 				fprintf(stderr, "newsession %d\n", n);
 			sessions[n++] = p;
 			continue;
+    default:
+      s = sessions[i-2];
+
+      for(tag=1; tag < nelem(tagmap) && tagmap[tag] > -1; tag++);
+      if(tag == nelem(tagmap))
+        continue; /* XXX */
+
+      if(decode_from_s(&m, f, s) < 0)
+        continue;
+
+      if(debug)
+        fprintf(stderr, "[%s] tag=%d->%d\n", s->label, m.tag, tag);
+
+      tagmap[tag] = m.tag;
+      pending[tag] = s;
+      m.tag = tag;
+
+      chansendp(ds->wc, encode(f, &m));
 		}
-
-		s = sessions[i-2];
-
-		for(tag=1; tag < nelem(tagmap) && tagmap[tag] > -1; tag++);
-		if(tag == nelem(tagmap))
-			continue; /* XXX */
-
-		if(decode_from_s(&m, f, s) < 0)
-			continue;
-
-		if(debug)
-			fprintf(stderr, "[%s] tag=%d->%d\n", s->label, m.tag, tag);
-
-		tagmap[tag] = m.tag;
-		pending[tag] = s;
-		m.tag = tag;
-
-		chansendp(ds->wc, encode(f, &m));
 	}
 }
 
