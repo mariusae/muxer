@@ -118,7 +118,7 @@ decode_from_ds(Session* pending[], mux_msg_t* m, mux_frame_t* f, Session* ds)
 	int decode_result;
 	Session *s;
 
-	decode_result = mux_msg_decode(m, f);
+	decode_result = mux_msg_decode(m, f, DECODE_HEADER_ONLY);
 
 	if(decode_result < 0){
 		if(debug)
@@ -154,7 +154,7 @@ ignore_frame:
 int
 decode_from_s(mux_msg_t* m, mux_frame_t* f, Session* s)
 {
-	int decode_result = mux_msg_decode(m, f);
+	int decode_result = mux_msg_decode(m, f, DECODE_HEADER_ONLY);
 
 	if(decode_result < 0){
 		if(debug)
