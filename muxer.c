@@ -115,16 +115,9 @@ taskmain(int argc, char **argv)
 Session*
 decode_from_ds(Session* pending[], mux_msg_t* m, mux_frame_t* f, Session* ds)
 {
-	int decode_result;
 	Session *s;
 
-	decode_result = mux_msg_decode(m, f, DECODE_HEADER_ONLY);
-
-	if(decode_result < 0){
-		if(debug)
-			fprintf(stderr, "[%s] decode failed: %s\n", ds->label, m->msg.exception);
-		goto ignore_frame;
-	}
+	mux_msg_decode_header(m, f);
 
 	// marker
 	if(m->tag == 0){
@@ -141,39 +134,8 @@ decode_from_ds(Session* pending[], mux_msg_t* m, mux_frame_t* f, Session* ds)
 
 ignore_msg:
 	mux_msg_reset(m);
-	// NB: fallthrough
-ignore_frame:
 	free(f);
 	return nil;
-}
-
-/**
- * Decodes from the given frame into the given message. If the message was decoded,
- * returns 0; else, a negative value.
- */
-int
-decode_from_s(mux_msg_t* m, mux_frame_t* f, Session* s)
-{
-	int decode_result = mux_msg_decode(m, f, DECODE_HEADER_ONLY);
-
-	if(decode_result < 0){
-		if(debug)
-			fprintf(stderr, "[%s] decode failed: %s\n", s->label, m->msg.exception);
-		goto ignore_frame;
-	}
-
-	if(m->tag == 0){
-		goto ignore_msg;
-	}
-
-	return decode_result;
-
-ignore_msg:
-	mux_msg_reset(m);
-	// NB: fallthrough
-ignore_frame:
-	free(f);
-	return decode_result;
 }
 
 /**
@@ -187,7 +149,7 @@ encode(mux_frame_t* frame_in, mux_msg_t* m)
 	mux_msg_encode(frame_out, m);
 	mux_msg_reset(m);
 	free(frame_in);
-  return frame_out;
+	return frame_out;
 }
 
 void
@@ -259,24 +221,29 @@ brokertask(void *v)
 				fprintf(stderr, "newsession %d\n", n);
 			sessions[n++] = p;
 			continue;
-    default:
-      s = sessions[i-2];
+		default:
+			s = sessions[i-2];
 
-      for(tag=1; tag < nelem(tagmap) && tagmap[tag] > -1; tag++);
-      if(tag == nelem(tagmap))
-        continue; /* XXX */
+			mux_msg_decode_header(&m, f);
+			if(m.tag == 0) {
+				// marker message
+				mux_msg_reset(&m);
+				free(f);
+				continue;
+			}
 
-      if(decode_from_s(&m, f, s) < 0)
-        continue;
+			for(tag=1; tag < nelem(tagmap) && tagmap[tag] > -1; tag++);
+			if(tag == nelem(tagmap))
+				continue; /* XXX */
 
-      if(debug)
-        fprintf(stderr, "[%s] tag=%d->%d\n", s->label, m.tag, tag);
+			if(debug)
+				fprintf(stderr, "[%s] tag=%d->%d\n", s->label, m.tag, tag);
 
-      tagmap[tag] = m.tag;
-      pending[tag] = s;
-      m.tag = tag;
+			tagmap[tag] = m.tag;
+			pending[tag] = s;
+			m.tag = tag;
 
-      chansendp(ds->wc, encode(f, &m));
+			chansendp(ds->wc, encode(f, &m));
 		}
 	}
 }
