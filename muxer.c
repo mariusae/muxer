@@ -1,109 +1,79 @@
 #include "a.h"
-#include "mux.h"
+#include "muxer.h"
 #include <task.h>
-
-/* XXX very leaky! */
-
-enum
-{
-	STACK = 32768,
-	Maxtags = 200,
-	Maxsessions = 200,
-};
-
-
-typedef
-struct Session
-{
-	char *label;
-	Channel *rc;
-	Channel *wc;
-} Session;
-
-typedef
-struct Call
-{
-	Session *s;
-} Call;
 
 char* argv0;
 int debug = 0;
 
 void brokertask(void *v);
-void readtask(void *v);
-void writetask(void *v);
-Session* mksession(char *label);
-void freesession(Session *s);
-Session* servesession(int fd, char *label);
+void writeframe(Session *s, Muxframe *f);
+void writeerr(Session *s, uint32 tag, char *fmt, ...);
 
 void
 usage()
 {
-	fprintf(stderr, "usage: %s \n", argv0);
+	fprintf(stderr, "usage: %s [-a announceaddr] [-D] destaddr\n", argv0);
 	taskexitall(1);
 }
 
 void
 taskmain(int argc, char **argv)
 {
-	int lport = 14041, fd, cfd, rport, p;
-	char *s;
-	char remote[16];
-	char label[32];
+	int fd, cfd, aport, dport, port;
+	char *aaddr, *daddr, peer[16];
+	Session *ds, *s;
+	Channel *c;
 	void **args;
-	Session *ds = nil;
-	Channel *nc;
+
+	ds = nil;
+	aaddr = "*";
+	aport = 14041;
 
 	ARGBEGIN{
 	case 'D':
 		debug = 1;
 		break;
-	case 'l':
-		lport = atoi(EARGF(usage()));
-		break;
-	case 'd':
-		s = EARGF(usage());
-		p = netmunge(s);
-		if(p < 0)
+	case 'a':
+		aaddr = EARGF(usage());
+		if((aport = netmunge(&aaddr)) < 0)
 			usage();
-
-		if ((fd = netdial(TCP, s, p)) < 0){
-			fprintf(stderr, "dst %s:%d unreachable\n", s, p);
-			taskexitall(1);
-		}
-
-		snprintf(label, sizeof label, "dest %s:%d", s, p);
-		ds = servesession(fd, label);
-
 		break;
 	case 'h':
 		usage();
 	}ARGEND
 
-	if(ds == nil){
-		fprintf(stderr, "no destination\n");
+	if(argc != 1)
 		usage();
+
+	daddr = argv[0];
+	if((dport = netmunge(&daddr)) < 0)
+		usage();
+
+	if ((fd = netdial(TCP, daddr, dport)) < 0){
+		fprintf(stderr, "dst %s:%d unreachable\n", daddr, dport);
+		taskexitall(1);
 	}
 
-	nc = chancreate(sizeof(void*), 1);
+	ds = mksession(fd, "dst %s:%d", daddr, dport);
+
+	if ((fd = netannounce(TCP, aaddr, aport)) < 0){
+		fprintf(stderr, "announce %s %d failed: %s\n", aaddr, aport, strerror(errno));
+		taskexitall(1);
+	}
+
+	c = chancreate(sizeof(void*), 256);
 
 	args = emalloc(sizeof(void*)*2);
 	args[0] = ds;
-	args[1] = nc;
-
+	args[1] = c;
 	taskcreate(brokertask, args, STACK);
 
-	if ((fd = netannounce(TCP, 0, lport)) < 0){
-		fprintf(stderr, "announce port %d failed: %s\n", lport, strerror(errno));
-		taskexitall(1);
-	}
-	fdnoblock(fd);
+	readsession(ds, c);
 
-	while((cfd = netaccept(fd, remote, &rport)) >= 0){
-		snprintf(label, sizeof label, "client %s:%d", remote, rport);
-		if(debug)
-			fprintf(stderr, "new client %s\n", label);
-		chansendp(nc, servesession(cfd, label));
+	while((cfd = netaccept(fd, peer, &port)) >= 0){
+		s = mksession(cfd, "client %s:%d", peer, port);
+		dprintf("new client %s\n", s->label);
+		readsession(s, c);
 	}
 }
 
@@ -112,197 +82,115 @@ brokertask(void *v)
 {
 	/* args: */
 		Session *ds;
-		Channel *nc;
-	int n = 0, i, tag;
-	Alt alts[Maxsessions+2];
-	Session *sessions[Maxsessions];
-	Session *pending[Maxtags];
-	int tagmap[Maxtags];
-	Muxframe *f;
-	Muxmsg *m;
-	void *p, **args;
+		Channel *c;
+	int stag, dtag, stype;
+	Muxmesg *sm, *m1;
+	void **argv;
 	Session *s;
+	Tags *tags;
 
-	void **argv = v;
-
+	argv = v;
 	ds = argv[0];
-	nc = argv[1];
-	free(p);
+	c = argv[1];
+	free(v);
 
-	for(i=0; i < nelem(tagmap); i++)
-		tagmap[i] = -1;
+	tags = mktags((1<<24)-1);
+
+	taskname("broker");
+
+	sm = m1 = nil;
 
 	for(;;){
-		alts[0].c = ds->rc;
-		alts[0].op = CHANRCV;
-		alts[0].v = &f;
-		alts[1].c = nc;
-		alts[1].op = CHANRCV;
-		alts[1].v = &p;
+		taskstate("waiting for message");
+		sm = chanrecvp(c);
 
-		for(i=0; i<n; i++){
-			alts[2+i].c = sessions[i]->rc;
-			alts[2+i].op = CHANRCV;
-			alts[2+i].v = &f;
+		if((stag = muxtag(sm->f)) == 0 || (stype = muxtype(sm->f)) == 0){
+			free(sm->f);
+			free(sm);
+			continue;
 		}
-		alts[2+i].op = CHANEND;
+		
+		/* There's a bug in in Finagle's mux implementation
+		 * since bytes are encoded in two's complement. */
+/*		if((stype&0x40) == 0x40){*/
+		if(stype<-60 || stype > 63){
+			if(stype > 0)
+				writeerr(sm->s, stag, "Unknown control message %d", stype);
+			free(sm->f);
+			free(sm);
+			continue;			
+		}
 
-		if(0)
-		for(i=0; alts[i].op != CHANEND; i++)
-			fprintf(stderr, "alt[%d] c=%p op=%d\n", i, alts[i].c, alts[i].op);
-
-		switch((i = chanalt(alts))){
-		case 0:
-			m = muxF2M(f);
-			free(f);
-
-			if(m == nil || m->tag == 0)
-				continue;
-
-			s = pending[m->tag];
-			if(s==nil){
-				if(debug)
-					fprintf(stderr, "[%s] unknown tag %d\n", ds->label, m->tag);
-				free(m);
+		if(stype > 0){	/* T-message */
+			if((dtag = nexttag(tags, sm)) < 0){
+				writeerr(sm->s, stag, "tags exhausted");
+				free(sm->f);
+				free(sm);
 				continue;
 			}
-			tag = tagmap[m->tag];
 
-			if(debug)
-				fprintf(stderr, "[%s] tag %d->%d\n", s->label, m->tag, tag);
+			sm->origtag = stag;
 
-			tagmap[m->tag] = -1;
-			m->tag = tag;
-			f = muxM2F(m);
-			chansendp(s->wc, f);
-			free(m);
+			dprintf("%s-> tag %d->%d\n", sm->s->label, stag, dtag);
+			muxsettag(sm->f, dtag);
+			writeframe(ds, sm->f);
 
-			continue;
+			free(sm->f);
+			sm->f = nil;
+		}else{	/* R-message */
+			if(stag < 0)
+				goto next;  /* Rerr */
 
-		case 1:
-			if(debug)
-				fprintf(stderr, "newsession %d\n", n);
-			sessions[n++] = p;
-			continue;
+			m1 = puttag(tags, stag);
+			if(m1 == nil){
+				dprintf("unknown tag %d\n", stag);
+				goto next;
+			}
+
+			dtag = m1->origtag;
+			s = m1->s;
+
+			muxsettag(sm->f, dtag);
+			writeframe(s, sm->f);
+
+	next:
+			free(sm->f);
+			free(sm);
+			free(m1);
 		}
 
-		s = sessions[i-2];
-
-		for(tag=1; tag < nelem(tagmap) && tagmap[tag] > -1; tag++);
-		if(tag == nelem(tagmap))
-			continue; /* XXX */
-
-		m = muxF2M(f);
-		free(f);
-		if(m == nil)
-			continue;
-		if(m->tag == 0){
-			free(m);
-			continue;
-		}
-
-		if(debug)
-			fprintf(stderr, "[%s] tag=%d->%d\n", s->label, m->tag, tag);
-
-		tagmap[tag] = m->tag;
-		pending[tag] = s;
-
-		m->tag = tag;
-		f = muxM2F(m);
-		free(m);
-
-		chansendp(ds->wc, f);
 	}
-}
-
-Session*
-servesession(int fd, char *label)
-{
-	void **args;
-	Session *s = mksession(label);
-
-	args = emalloc(2*sizeof(void*));
-	args[0] = (void*)(uintptr)fd;
-	args[1] = s;
-
-	taskcreate(readtask, args, STACK);
-
-	args = emalloc(2*sizeof(void*));
-	args[0] = (void*)(uintptr)fd;
-	args[1] = s;
-
-	taskcreate(writetask, args, STACK);
-
-	return s;
-}
-
-void
-readtask(void *v)
-{
-	/* args: */
-		int fd;
-		Session *s;
-	void **argv = (void**)v;
-	Muxframe *f;
-
-	fd = (uintptr)argv[0];
-	s = argv[1];
-	free(v);
-
-	while((f=muxreadframe(fd)) != nil){
-		if(debug)
-			fprintf(stderr, "[%s] R %d \n", s->label, f->n);
-		chansendp(s->rc, f);
-	}
-
-	/* XXX shutdown/close */
-
-}
-
-void
-writetask(void *v)
-{
-	/* args: */
-		int fd;
-		Session *s;
-	void **argv = (void**)v;
-	Muxframe *f;
-	uchar siz[4];
-
-	fd = (uintptr)argv[0];
-	s = argv[1];
-	free(v);
-
-	while((f=chanrecvp(s->wc)) != nil){
-		if(debug)
-			fprintf(stderr, "[%s] W %d\n", s->label, f->n);
-		U32PUT(siz, f->n);
-		fdwrite(fd, siz, 4);
-		fdwrite(fd, f->buf, f->n);
-		free(f);
-	}
-
-	/* XXX shutdown/close */
-}
-
-Session*
-mksession(char *label)
-{
-	Session *s;
 	
-	s = emalloc(sizeof(Session));
-
-	s->label = strdup(label);
-	s->rc = chancreate(sizeof(void*), 64);
-	s->wc = chancreate(sizeof(void*), 64);
-
-	return s;
+	freetags(tags);
 }
 
 void
-freesession(Session *s)
+writeframe(Session *s, Muxframe *f)
 {
-	chanfree(s->rc);
-	chanfree(s->wc);
-	free(s);
+	uchar siz[4];
+	
+	taskstate("%s<- frame tag %d size %d\n", s->label, muxtag(f), f->n);
+	dprintf("%s\n", taskgetstate());
+	U32PUT(siz, f->n);
+	fdwrite(s->fd, siz, 4);
+	fdwrite(s->fd, f->buf, f->n);
+	taskstate("");
+}
+
+void
+writeerr(Session *s, uint32 tag, char *fmt, ...)
+{
+	Muxframe *f;
+	va_list arg;
+
+	f = alloca(sizeof(Muxframe)+260);
+	muxsettype(f, Rerr);
+	muxsettag(f, tag);
+	f->n = 260;
+	va_start(arg, fmt);
+	f->n = 4 + vsnprintf((char*)f->buf+4, f->n-4, fmt, arg);
+	va_end(arg);
+
+
+	writeframe(s, f);
 }

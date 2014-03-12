@@ -12,15 +12,18 @@ emalloc(uint n)
 }
 
 int
-netmunge(char *s)
+netmunge(char **s)
 {
 	char *p;
 
-	if ((p=index(s, ':')) == nil)
+	if ((p=index(*s, ':')) == nil)
 		return -1;
-		
-	*p = nil;
-	
+
+	if(p==*s)
+		*s = "*";
+	else
+		*p = 0;
+
 	return atoi(&p[1]);
 }
 

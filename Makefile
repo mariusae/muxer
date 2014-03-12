@@ -1,10 +1,10 @@
-CFLAGS =  -g -Ilibtask
+CFLAGS =  -Wall -g -Ilibtask
 
 .PHONY: all
 
 all: muxer
 
-OFILES=u.o mux.o
+OFILES=u.o prot.o session.o tags.o
 LIB=libtask/libtask.a
 
 libtask/libtask.a:
