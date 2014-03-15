@@ -1,6 +1,7 @@
 #include "taskimpl.h"
 #include <sys/poll.h>
 #include <fcntl.h>
+#include <stdio.h>
 
 enum
 {
@@ -181,6 +182,47 @@ fdwrite(int fd, void *buf, int n)
 		if(m == 0)
 			break;
 	}
+	return tot;
+}
+
+/**
+ * NB: may mutate input iovecs
+ */
+ssize_t
+fdwritev(int fd, struct iovec *base_iov, int base_iovcnt)
+{
+	ssize_t m, iovm, tot;
+  int iovcnt;
+  struct iovec *iov = base_iov;
+
+  // while there are iovecs
+  for(iovcnt=base_iovcnt, tot=0; iovcnt>0; tot+=m){
+    while((m=writev(fd, iov, iovcnt)) < 0 && errno == EAGAIN)
+      fdwait(fd, 'w');
+    printf("wrote %lu with %d remaining of %d\n", m, iovcnt, base_iovcnt);
+    if(m < 0)
+      return m;
+    if(m == 0)
+      goto success;
+
+    // offset to new starting vec
+    for(iovm=m; iovm > 0;){
+      if(iovm < iov->iov_len) {
+        // partially consumed this iovec: mutate it
+        iov->iov_base += iovm;
+        break;
+      } else if (iovcnt == 1){
+        // consumed the last iovec
+        goto success;
+      } else {
+        // fully consumed this iovec: move to the next
+        iovm -= iov->iov_len;
+        iov++;
+        iovcnt--;
+      }
+    }
+  }
+success:
 	return tot;
 }
 

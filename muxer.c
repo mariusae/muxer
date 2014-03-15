@@ -301,15 +301,31 @@ writetask(void *v)
 	mux_frame_t *f;
 	int i;
 
+  struct iovec* iovecs = emalloc(1);
+  int iovecs_cnt = 0;
+
 	fd = (uintptr)argv[0];
 	s = argv[1];
 	free(v);
+
 	while((f=chanrecvp(s->wc)) != nil){
 		if(debug)
 			fprintf(stderr, "[%s] W %d\n", s->label, f->size);
-		for(i = 0; i < f->size; i++) {
-			fdwrite(fd, f->bufs[i].data, f->bufs[i].size);
-		}
+
+    // expand iovecs if necessary
+    if(iovecs_cnt < f->size){
+      free(iovecs);
+      iovecs = emalloc(sizeof(struct iovec) * f->size);
+      iovecs_cnt = f->size;
+    }
+    // copy to iovecs
+    for(i=0; i < f->size; i++) {
+      iovecs[i].iov_base = f->bufs[i].data;
+      iovecs[i].iov_len = f->bufs[i].size;
+    }
+    // write iovecs
+		fdwritev(fd, iovecs, iovecs_cnt);
+
 		mux_frame_destroy(f);
 	}
 
