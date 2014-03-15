@@ -108,16 +108,17 @@ taskmain(int argc, char **argv)
 }
 
 /**
- * Decodes from the given frame into the given message. If the message is decoded
- * and there is an associated Session, returns the Session; otherwise, frees the
- * frame and returns nil.
+ * Decodes from the given frame into the given message and frees the frame. If the
+ * message is decoded and there is an associated Session, returns the Session; otherwise,
+ * returns nil.
  */
 Session*
 decode_from_ds(Session* pending[], mux_msg_t* m, mux_frame_t* f, Session* ds)
 {
 	Session *s;
 
-	mux_msg_decode_header(m, f);
+	mux_frame_to_msg(m, f);
+	mux_frame_destroy(f);
 
 	// marker
 	if(m->tag == 0){
@@ -134,7 +135,6 @@ decode_from_ds(Session* pending[], mux_msg_t* m, mux_frame_t* f, Session* ds)
 
 ignore_msg:
 	mux_msg_reset(m);
-	free(f);
 	return nil;
 }
 
@@ -143,12 +143,11 @@ ignore_msg:
  * the input msg/frame.
  */
 mux_frame_t*
-encode(mux_frame_t* frame_in, mux_msg_t* m)
+encode(mux_msg_t* m)
 {
 	mux_frame_t* frame_out = mux_frame_create(128);
 	mux_msg_encode(frame_out, m);
 	mux_msg_reset(m);
-	free(frame_in);
 	return frame_out;
 }
 
@@ -212,7 +211,7 @@ brokertask(void *v)
 			tagmap[m.tag] = -1;
 			m.tag = tag;
 
-			chansendp(s->wc, encode(f, &m));
+			chansendp(s->wc, encode(&m));
 
 			continue;
 
@@ -224,11 +223,11 @@ brokertask(void *v)
 		default:
 			s = sessions[i-2];
 
-			mux_msg_decode_header(&m, f);
+			mux_frame_to_msg(&m, f);
+			mux_frame_destroy(f);
 			if(m.tag == 0) {
 				// marker message
 				mux_msg_reset(&m);
-				free(f);
 				continue;
 			}
 
@@ -243,7 +242,7 @@ brokertask(void *v)
 			pending[tag] = s;
 			m.tag = tag;
 
-			chansendp(ds->wc, encode(f, &m));
+			chansendp(ds->wc, encode(&m));
 		}
 	}
 }
@@ -300,16 +299,18 @@ writetask(void *v)
 		Session *s;
 	void **argv = (void**)v;
 	mux_frame_t *f;
+	int i;
 
 	fd = (uintptr)argv[0];
 	s = argv[1];
 	free(v);
-
 	while((f=chanrecvp(s->wc)) != nil){
 		if(debug)
 			fprintf(stderr, "[%s] W %d\n", s->label, f->size);
-		fdwrite(fd, f->data, f->size);
-		free(f);
+		for(i = 0; i < f->size; i++) {
+			fdwrite(fd, f->bufs[i].data, f->bufs[i].size);
+		}
+		mux_frame_destroy(f);
 	}
 
 	/* XXX shutdown/close */
