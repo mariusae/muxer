@@ -77,50 +77,6 @@ taskmain(int argc, char **argv)
 	}
 }
 
-/**
- * Decodes from the given frame into the given message and frees the frame. If the
- * message is decoded and there is an associated Session, returns the Session; otherwise,
- * returns nil.
- */
-Session*
-decode_from_ds(Session* pending[], mux_msg_t* m, mux_frame_t* f, Session* ds)
-{
-	Session *s;
-
-	mux_frame_to_msg(m, f);
-	mux_frame_destroy(f);
-
-	// marker
-	if(m->tag == 0){
-		goto ignore_msg;
-	}
-
-	s = pending[m->tag];
-	if(s==nil){
-		if(debug)
-			fprintf(stderr, "[%s] unknown tag %d\n", ds->label, m->tag);
-		goto ignore_msg;
-	}
-	return s;
-
-ignore_msg:
-	mux_msg_reset(m);
-	return nil;
-}
-
-/**
- * Encodes the given msg/frame into a new frame and returns it, then resets/frees
- * the input msg/frame.
- */
-mux_frame_t*
-encode(mux_msg_t* m)
-{
-	mux_frame_t* frame_out = mux_frame_create(128);
-	mux_msg_encode(frame_out, m);
-	mux_msg_reset(m);
-	return frame_out;
-}
-
 void
 brokertask(void *v)
 {
