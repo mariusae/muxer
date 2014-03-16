@@ -56,11 +56,12 @@ struct Session
 {
 	char *label;
 	int fd;
+	Channel* r;
+	Channel* w;
 } Session;
 
-Session* mksession(int fd, char *fmt, ...);
+Session* mksession(int fd, Channel *r, char *fmt, ...);
 void freesession(Session *s);
-void readsession(Session *s, Channel *c);
 
 typedef 
 struct Muxmesg
