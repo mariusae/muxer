@@ -5,6 +5,7 @@
 #include <task.h>
 #include <stdlib.h>
 #include <sys/socket.h>
+#include <assert.h>
 
 #include "arg.h"
 
@@ -35,8 +36,9 @@ typedef unsigned char uchar;
 typedef unsigned long uintptr;
 
 #define nil (void*)0
+#define dprintf(...) if(debug) fprintf(stderr, __VA_ARGS__)
 
 void* emalloc(uint n);
 
-int netmunge(char *s);
+int netmunge(char **s);
 int fdreadn(int fd, void *buf, uint n);

@@ -4,7 +4,7 @@ CFLAGS =  -g -Wall -Wextra -Ilibtask -I../libmux
 
 all: muxer
 
-OFILES=u.o muxtask.o
+OFILES=u.o prot.o session.o tags.o
 LIB=libtask/libtask.a
 
 ../libmux/libmux.a:
