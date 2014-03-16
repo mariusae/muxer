@@ -9,6 +9,7 @@ extern "C" {
 
 #include <stdarg.h>
 #include <inttypes.h>
+#include <sys/uio.h>
 
 /*
  * basic procs and threads
@@ -155,6 +156,7 @@ int		chansendul(Channel *c, unsigned long v);
 int		fdread(int, void*, int);
 int		fdread1(int, void*, int);	/* always uses fdwait */
 int		fdwrite(int, void*, int);
+ssize_t fdwritev(int, struct iovec*, int);
 void		fdwait(int, int);
 int		fdnoblock(int);
 
