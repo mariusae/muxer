@@ -59,7 +59,6 @@ struct Session
 } Session;
 
 Session* mksession(int fd, char *fmt, ...);
-void freesession(Session *s);
 void readsession(Session *s, Channel *c);
 
 typedef 

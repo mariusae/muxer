@@ -21,12 +21,6 @@ mksession(int fd, char *fmt, ...)
 }
 
 void
-freesession(Session *s)
-{
-	free(s);
-}
-
-void
 readsession(Session *s, Channel *c)
 {
 	void **args;
