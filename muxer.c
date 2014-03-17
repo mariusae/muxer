@@ -109,11 +109,9 @@ brokertask(void *v)
 			free(sm);
 			continue;
 		}
-		
-		/* There's a bug in in Finagle's mux implementation
-		 * since bytes are encoded in two's complement. */
-/*		if((stype&0x40) == 0x40){*/
-		if(stype<-60 || stype > 63){
+
+		/* -62, 127 are essentially protocol bugs */
+		if(abs(stype) >= 64 || stype == -62 || stype == 127){
 			if(stype > 0)
 				writeerr(sm->s, stag, "Unknown control message %d", stype);
 			free(sm->f);
