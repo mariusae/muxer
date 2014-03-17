@@ -14,7 +14,6 @@ struct Muxframe
 	uchar buf[];
 } Muxframe;
 
-
 enum
 {
 	/* Application messages */
@@ -28,13 +27,12 @@ enum
 	Tdrain = 64,
 	Rdrain = -64,
 	Tping = 65,
-	Rping = -63,
+	Rping = -65,
 	
-	Tdiscarded = -62,
-	Tlease = -61,
+	Tdiscarded = 66,
+	Tlease = -67,
 	
-	/* Could be either */
-	Rerr = 127,
+	Rerr = -128,
 	
 	Unknown = 0
 };
