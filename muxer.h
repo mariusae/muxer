@@ -54,7 +54,7 @@ void* puttag(Tags *t, uint tag);
 typedef
 struct Session
 {
-	char *label;
+	char label[64];
 	int fd;
 } Session;
 

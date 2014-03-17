@@ -12,7 +12,7 @@ void writeerr(Session *s, uint32 tag, char *fmt, ...);
 void
 usage()
 {
-	fprintf(stderr, "usage: %s [-a announceaddr] [-D] destaddr\n", argv0);
+	fprint(2, "usage: %s [-a announceaddr] [-D] destaddr\n", argv0);
 	taskexitall(1);
 }
 
@@ -50,14 +50,14 @@ taskmain(int argc, char **argv)
 		usage();
 
 	if ((fd = netdial(TCP, daddr, dport)) < 0){
-		fprintf(stderr, "dst %s:%d unreachable\n", daddr, dport);
+		fprint(2, "dst %s:%d unreachable\n", daddr, dport);
 		taskexitall(1);
 	}
 
 	ds = mksession(fd, "dst %s:%d", daddr, dport);
 
 	if ((fd = netannounce(TCP, aaddr, aport)) < 0){
-		fprintf(stderr, "announce %s %d failed: %s\n", aaddr, aport, strerror(errno));
+		fprint(2, "announce %s:%d failed: %r\n", aaddr, aport);
 		taskexitall(1);
 	}
 

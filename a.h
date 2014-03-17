@@ -26,6 +26,25 @@
 #define	U48PUT(p,v,t32)	t32=(v)>>32;U16PUT(p,t32);t32=(v);U32PUT((p)+2,t32)
 #define	U64PUT(p,v,t32)	t32=(v)>>32;U32PUT(p,t32);t32=(v);U32PUT((p)+4,t32)
 
+#define print task_print
+#define fprint task_fprint
+#define snprint task_snprint
+#define seprint task_seprint
+#define vprint task_vprint
+#define vfprint task_vfprint
+#define vsnprint task_vsnprint
+#define vseprint task_vseprint
+#define strecpy task_strecpy
+
+int print(char*, ...);
+int fprint(int, char*, ...);
+char *snprint(char*, uint, char*, ...);
+char *seprint(char*, char*, char*, ...);
+int vprint(char*, va_list);
+int vfprint(int, char*, va_list);
+char *vsnprint(char*, uint, char*, va_list);
+char *vseprint(char*, char*, char*, va_list);
+char *strecpy(char*, char*, char*);
 
 typedef unsigned int uint32;
 typedef unsigned long long uint64;
@@ -36,7 +55,7 @@ typedef unsigned char uchar;
 typedef unsigned long uintptr;
 
 #define nil (void*)0
-#define dprintf(...) if(debug) fprintf(stderr, __VA_ARGS__)
+#define dprintf(...) if(debug) fprint(2, __VA_ARGS__)
 
 void* emalloc(uint n);
 

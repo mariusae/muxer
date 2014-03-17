@@ -14,8 +14,7 @@ mksession(int fd, char *fmt, ...)
 	s->fd = fd;
 
 	va_start(arg, fmt);
-	s->label = emalloc(256);
-	vsnprintf(s->label, 256, fmt, arg);
+	vsnprintf(s->label, sizeof s->label, fmt, arg);
 	va_end(arg);
 
 	return s;
@@ -24,7 +23,6 @@ mksession(int fd, char *fmt, ...)
 void
 freesession(Session *s)
 {
-	free(s->label);
 	free(s);
 }
 
