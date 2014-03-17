@@ -53,17 +53,26 @@ typedef
 struct Session
 {
 	char label[64];
+	
+	/* need a lock for the fd */
 	int fd;
 } Session;
 
 Session* mksession(int fd, char *fmt, ...);
 void readsession(Session *s, Channel *c);
 
+typedef
+struct Muxhdr
+{
+	uint32 siz;
+	char type;
+	uint24 tag;
+} Muxhdr;
+
 typedef 
 struct Muxmesg
 {
-	uint origtag;
-
+	Muxhdr hd;
+	Channel *donec;
 	Session *s;
-	Muxframe *f;
 } Muxmesg;

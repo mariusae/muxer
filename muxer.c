@@ -1,13 +1,18 @@
 #include "a.h"
 #include "muxer.h"
 #include <task.h>
+#include <fcntl.h>
 
 char* argv0;
 int debug = 0;
 
 void brokertask(void *v);
-void writeframe(Session *s, Muxframe *f);
+void writeheader(Session *s, Muxhdr *h);
 void writeerr(Session *s, uint32 tag, char *fmt, ...);
+void writeframe(Session *dst, Muxhdr *hd, char *buf);
+void copyframe(Session *dst, Session *src, Muxhdr *hd);
+
+Session nilsess;
 
 void
 usage()
@@ -24,6 +29,9 @@ taskmain(int argc, char **argv)
 	Session *ds, *s;
 	Channel *c;
 	void **args;
+
+	strcpy(nilsess.label, "nil");
+	nilsess.fd = open("/dev/null", O_RDWR);
 
 	ds = nil;
 	aaddr = "*";
@@ -83,11 +91,11 @@ brokertask(void *v)
 	/* args: */
 		Session *ds;
 		Channel *c;
-	int stag, dtag, stype;
-	Muxmesg *sm, *m1;
+	int tag;
+	Muxmesg *mesg, *tmesg;
 	void **argv;
-	Session *s;
 	Tags *tags;
+	Muxhdr hd;
 
 	argv = v;
 	ds = argv[0];
@@ -98,97 +106,125 @@ brokertask(void *v)
 
 	taskname("broker");
 
-	sm = m1 = nil;
-
 	for(;;){
 		taskstate("waiting for message");
-		sm = chanrecvp(c);
+		mesg = chanrecvp(c);
 
-		if((stag = muxtag(sm->f)) == 0 || (stype = muxtype(sm->f)) == 0){
-			free(sm->f);
-			free(sm);
+		if(mesg->hd.tag == 0 || mesg->hd.type == 0){
+			copyframe(&nilsess, mesg->s, &mesg->hd);
+			chansendp(mesg->donec, mesg);
 			continue;
 		}
 
-		/* -62, 127 are essentially protocol bugs */
-		if(abs(stype) >= 64 || stype == -62 || stype == 127){
-			if(stype > 0)
-				writeerr(sm->s, stag, "Unknown control message %d", stype);
-			free(sm->f);
-			free(sm);
+		if(abs(mesg->hd.type) >= 64){
+			if(mesg->hd.type > 0){
+				writeerr(mesg->s, mesg->hd.tag, 
+					"Unknown control message %d", mesg->hd.type);
+			}
+
+			copyframe(&nilsess, mesg->s, &mesg->hd);
+			chansendp(mesg->donec, mesg);
 			continue;			
 		}
 
-		if(stype > 0){	/* T-message */
-			if((dtag = nexttag(tags, sm)) < 0){
-				writeerr(sm->s, stag, "tags exhausted");
-				free(sm->f);
-				free(sm);
+		if(mesg->hd.type > 0){	/* T-message */
+			if((tag = nexttag(tags, mesg)) < 0){
+				writeerr(mesg->s, mesg->hd.tag, "tags exhausted");
+				copyframe(&nilsess, mesg->s, &mesg->hd);
+				chansendp(mesg->donec, mesg);
 				continue;
 			}
 
-			sm->origtag = stag;
+			hd = mesg->hd;
+			hd.tag = tag;
 
-			dprintf("%s-> tag %d->%d\n", sm->s->label, stag, dtag);
-			muxsettag(sm->f, dtag);
-			writeframe(ds, sm->f);
-
-			free(sm->f);
-			sm->f = nil;
+			copyframe(ds, mesg->s, &hd);
 		}else{	/* R-message */
-			if(stag < 0)
-				goto next;  /* Rerr */
-
-			m1 = puttag(tags, stag);
-			if(m1 == nil){
-				dprintf("unknown tag %d\n", stag);
-				goto next;
+			if((tmesg = puttag(tags, mesg->hd.tag)) == nil){
+				dprintf("no T-message for tag %d\n", mesg->hd.tag);
+				copyframe(&nilsess, mesg->s, &mesg->hd);
+				chansendp(mesg->donec, mesg);
+				continue;
 			}
 
-			dtag = m1->origtag;
-			s = m1->s;
+			hd = mesg->hd;
+			hd.tag = tmesg->hd.tag;
 
-			muxsettag(sm->f, dtag);
-			writeframe(s, sm->f);
-
-	next:
-			free(sm->f);
-			free(sm);
-			free(m1);
+			copyframe(tmesg->s, mesg->s, &hd);
+			chansendp(mesg->donec, mesg);
+			chansendp(tmesg->donec, tmesg);
 		}
-
 	}
-	
-	freetags(tags);
-}
 
-void
-writeframe(Session *s, Muxframe *f)
-{
-	uchar siz[4];
-	
-	taskstate("%s<- frame tag %d size %d\n", s->label, muxtag(f), f->n);
-	dprintf("%s\n", taskgetstate());
-	U32PUT(siz, f->n);
-	fdwrite(s->fd, siz, 4);
-	fdwrite(s->fd, f->buf, f->n);
-	taskstate("");
+	freetags(tags);
 }
 
 void
 writeerr(Session *s, uint32 tag, char *fmt, ...)
 {
-	Muxframe *f;
 	va_list arg;
-	char *e;
+	char buf[64];
+	Muxhdr hd;
 
-	f = alloca(sizeof(Muxframe)+260);
-	muxsettype(f, Rerr);
-	muxsettag(f, tag);
 	va_start(arg, fmt);
-	vsnprint((char*)f->buf+4, 256, fmt, arg);
+	vsnprint(buf, sizeof buf, fmt, arg);
 	va_end(arg);
-	f->n = 4 + strlen((char*)f->buf+4);
 
-	writeframe(s, f);
+	hd.siz = strlen(buf);
+	hd.type = Rerr;
+	hd.tag = tag;
+
+	writeframe(s, &hd, buf);
 }
+
+void
+writeframe(Session *dst, Muxhdr *hd, char *buf)
+{
+	uchar hdbuf[8];
+	
+	U32PUT(hdbuf, hd->siz);
+	hdbuf[4] = hd->type;
+	U24PUT(hdbuf+5, hd->tag);
+	
+	fdwrite(dst->fd, hdbuf, sizeof hdbuf);
+	fdwrite(dst->fd, buf, hd->siz);
+}
+
+void
+copyframe(Session *dst, Session *src, Muxhdr *hd)
+{
+	static uchar buf[1024];
+	int n, m;
+
+	U32PUT(buf, hd->siz);
+	buf[4] = hd->type;
+	U24PUT(buf+5, hd->tag);
+	
+	dprintf("%s->%s size %d type %d tag %d\n", 
+		src->label, dst->label, hd->siz, hd->type, hd->tag);
+
+	taskstate("%s->%s header tag %d size %d\n", 
+		src->label, dst->label, hd->tag, hd->siz);
+	fdwrite(dst->fd, buf, 8);
+
+	taskstate("%s->%s frame tag %d size %d\n", 
+		src->label, dst->label, hd->tag, hd->siz);
+	n = hd->siz-4;
+	while(n>0){
+		m = n < sizeof buf ? n : sizeof buf;
+
+		/* TODO: handle */
+		if((m=fdread(src->fd, buf, m)) < 0){
+			fprint(2, "Failed to read from session %s: %r", src->label);
+			return;
+		}
+
+		/* TODO: short writes */
+		fdwrite(dst->fd, buf, m);
+		n -= m;
+	}
+
+	taskstate("");
+}
+
+/* Todo: sendframe */

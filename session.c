@@ -39,9 +39,9 @@ readsessiontask(void *v)
 		Session *s;
 		Channel *c;
 
-	uchar siz[4];
-	uint n;
+	uchar hd[8];
 	Muxmesg *m;
+	Channel *donec;
 
 	void **argv = v;
 
@@ -49,36 +49,29 @@ readsessiontask(void *v)
 	c = argv[1];
 	free(argv);
 	
+	donec = chancreate(sizeof(void*), 1);
+
 	taskname("read %s", s->label);
 
-
 	for(;;){
-		/* Read a frame, send a frame */
-		taskstate("reading frame size");
-		if(fdreadn(s->fd, siz, 4) != 4)
-			goto err;
+		taskstate("reading frame header");
+		if(fdreadn(s->fd, hd, 8) != 8)
+			break;
 
-		n = U32GET(siz);
-
-		m = emalloc(sizeof(Muxmesg));
+		m = emalloc(sizeof *m);
+		m->hd.siz = U32GET(hd);
+		m->hd.type = (char)hd[4];
+		m->hd.tag = U24GET(hd+5);
+		
+		/* XXX adjust for  stype == -62 || stype == 127){ */
+		
+		m->donec = donec;
 		m->s = s;
-		m->f = emalloc(sizeof(Muxframe)+n);
-		m->f->n = n;
 
-		taskstate("reading frame");
-		if(fdreadn(s->fd, m->f->buf, n) != n){
-			free(m->f);
-			free(m);
-			goto err;
-		}
-
-		dprintf("%s-> read frame size %d\n", s->label, n);
-
-		taskstate("sending message");
 		chansendp(c, m);
+		taskstate("waiting for done signal");
+		free(chanrecvp(donec));
 	}
 
-err:
-	if(0)
-		;
+	chanfree(donec);
 }
