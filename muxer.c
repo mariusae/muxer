@@ -180,15 +180,15 @@ writeerr(Session *s, uint32 tag, char *fmt, ...)
 {
 	Muxframe *f;
 	va_list arg;
+	char *e;
 
 	f = alloca(sizeof(Muxframe)+260);
 	muxsettype(f, Rerr);
 	muxsettag(f, tag);
-	f->n = 260;
 	va_start(arg, fmt);
-	f->n = 4 + vsnprintf((char*)f->buf+4, f->n-4, fmt, arg);
+	vsnprint((char*)f->buf+4, 256, fmt, arg);
 	va_end(arg);
-
+	f->n = 4 + strlen((char*)f->buf+4);
 
 	writeframe(s, f);
 }

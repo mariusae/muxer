@@ -14,7 +14,7 @@ mksession(int fd, char *fmt, ...)
 	s->fd = fd;
 
 	va_start(arg, fmt);
-	vsnprintf(s->label, sizeof s->label, fmt, arg);
+	vsnprint(s->label, sizeof s->label, fmt, arg);
 	va_end(arg);
 
 	return s;
