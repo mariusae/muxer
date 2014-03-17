@@ -77,3 +77,6 @@ struct Muxmesg
 	QLock *locked;
 	Session **sp;
 } Muxmesg;
+
+
+void copyframe(Session *dst, Session *src, Muxhdr *hd);
