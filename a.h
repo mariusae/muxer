@@ -62,3 +62,4 @@ void* emalloc(uint n);
 
 int netmunge(char **s);
 int fdreadn(int fd, void *buf, uint n);
+int fdwritev(int fd, struct iovec *_iov, int iovn);

@@ -1,11 +1,12 @@
 #include "a.h"
+#include <sys/uio.h>
 
 void*
 emalloc(uint n)
 {
 	void *p;
 
-	if((p = malloc(n)) == nil)
+	if((p = calloc(n, 1)) == nil)
 		abort();
 
 	return p;
@@ -41,4 +42,35 @@ fdreadn(int fd, void *buf, uint n)
 	}
 
 	return q;
+}
+
+int
+fdwritev(int fd, struct iovec *_iov, int iovn)
+{
+	int n, m, q, i, tot;
+	struct iovec *iov;
+	
+	iov = alloca(sizeof(struct iovec)*iovn);
+	memcpy(iov, _iov, sizeof(struct iovec)*iovn);
+
+	for(i=0, n=0; i<iovn; i++)
+		n += iov[i].iov_len;
+
+	for(tot=0; tot<n; tot+=m){
+		while((m = writev(fd, iov, iovn)) < 0 && errno == EAGAIN)
+			fdwait(fd, 'w');
+		if(m < 0)
+			return m;
+		if(m==0)
+			break;
+
+		/* Skip over completed buffers */
+		for(q=0; (q+=iov->iov_len)<m; iov++, iovn--)
+			;
+
+		iov->iov_len -= q-m;
+		iov->iov_base += q-m;
+	}
+	
+	return tot;
 }

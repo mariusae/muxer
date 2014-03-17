@@ -2,6 +2,7 @@
 #include "muxer.h"
 #include <task.h>
 #include <fcntl.h>
+#include <sys/uio.h>
 
 char* argv0;
 int debug = 0;
@@ -103,6 +104,7 @@ brokertask(void *v)
 	free(v);
 
 	tags = mktags((1<<24)-1);
+	mesg = nil;
 
 	taskname("broker");
 
@@ -111,49 +113,50 @@ brokertask(void *v)
 		mesg = chanrecvp(c);
 
 		if(mesg->hd.tag == 0 || mesg->hd.type == 0){
-			copyframe(&nilsess, mesg->s, &mesg->hd);
-			chansendp(mesg->donec, mesg);
-			continue;
+			copyframe(&nilsess, *mesg->sp, &mesg->hd);
+			goto next;
 		}
 
 		if(abs(mesg->hd.type) >= 64){
 			if(mesg->hd.type > 0){
-				writeerr(mesg->s, mesg->hd.tag, 
+				writeerr(*mesg->sp, mesg->hd.tag, 
 					"Unknown control message %d", mesg->hd.type);
 			}
 
-			copyframe(&nilsess, mesg->s, &mesg->hd);
-			chansendp(mesg->donec, mesg);
-			continue;			
+			copyframe(&nilsess, *mesg->sp, &mesg->hd);
+			goto next;
 		}
 
 		if(mesg->hd.type > 0){	/* T-message */
 			if((tag = nexttag(tags, mesg)) < 0){
-				writeerr(mesg->s, mesg->hd.tag, "tags exhausted");
-				copyframe(&nilsess, mesg->s, &mesg->hd);
-				chansendp(mesg->donec, mesg);
-				continue;
+				copyframe(&nilsess, *mesg->sp, &mesg->hd);
+				writeerr(*mesg->sp, mesg->hd.tag, "tags exhausted");
+				free(mesg);
+				goto next;
 			}
 
 			hd = mesg->hd;
 			hd.tag = tag;
 
-			copyframe(ds, mesg->s, &hd);
+			copyframe(ds, *mesg->sp, &hd);
 		}else{	/* R-message */
 			if((tmesg = puttag(tags, mesg->hd.tag)) == nil){
 				dprint("no T-message for tag %d\n", mesg->hd.tag);
-				copyframe(&nilsess, mesg->s, &mesg->hd);
-				chansendp(mesg->donec, mesg);
-				continue;
+				copyframe(&nilsess, *mesg->sp, &mesg->hd);
+				free(mesg);
+				goto next;
 			}
 
 			hd = mesg->hd;
 			hd.tag = tmesg->hd.tag;
 
-			copyframe(tmesg->s, mesg->s, &hd);
-			chansendp(mesg->donec, mesg);
-			chansendp(tmesg->donec, tmesg);
+			copyframe(*tmesg->sp, *mesg->sp, &hd);
+
+			free(mesg);
+			free(tmesg);
 		}
+  next:
+  		qunlock(mesg->locked);
 	}
 
 	freetags(tags);
@@ -181,11 +184,11 @@ void
 writeframe(Session *dst, Muxhdr *hd, char *buf)
 {
 	uchar hdbuf[8];
-	
+
 	U32PUT(hdbuf, hd->siz);
 	hdbuf[4] = hd->type;
 	U24PUT(hdbuf+5, hd->tag);
-	
+
 	fdwrite(dst->fd, hdbuf, sizeof hdbuf);
 	fdwrite(dst->fd, buf, hd->siz);
 }
@@ -193,35 +196,54 @@ writeframe(Session *dst, Muxhdr *hd, char *buf)
 void
 copyframe(Session *dst, Session *src, Muxhdr *hd)
 {
-	static uchar buf[1024];
-	int n, m;
+	uchar hdbuf[8];
+	uchar buf[1024];
+	struct iovec iov[2], *io, *iop;
+	int n, tot, ion;
 
-	U32PUT(buf, hd->siz);
-	buf[4] = hd->type;
-	U24PUT(buf+5, hd->tag);
+	U32PUT(hdbuf, hd->siz);
+	hdbuf[4] = hd->type;
+	U24PUT(hdbuf+5, hd->tag);
 	
+	iov[0].iov_base = hdbuf;
+	iov[0].iov_len = 8;
+	
+	io = &iov[1];
+	iop = iov;
+	ion = 2;
+
 	dprint("%s->%s size %d type %d tag %d\n", 
 		src->label, dst->label, hd->siz, hd->type, hd->tag);
 
-	taskstate("%s->%s header tag %d size %d\n", 
-		src->label, dst->label, hd->tag, hd->siz);
-	fdwrite(dst->fd, buf, 8);
-
 	taskstate("%s->%s frame tag %d size %d\n", 
 		src->label, dst->label, hd->tag, hd->siz);
-	n = hd->siz-4;
-	while(n>0){
-		m = n < sizeof buf ? n : sizeof buf;
 
-		/* TODO: handle */
-		if((m=fdread(src->fd, buf, m)) < 0){
+
+	for(tot=0; tot<hd->siz-4; tot+=n){
+		n = hd->siz-4-tot;
+		if(n > sizeof buf)
+			n = sizeof buf;
+
+		if((n=fdread(src->fd, buf, n)) < 0){
+			/* It might be interesting to explore having some sort of 
+			 * trailer to indicate success or failure from middle boxes,
+			 * so that these kinds of failures may be handled gracefully,
+			 * and the recipient session not destroyed. */
+			src->active = 0;
 			fprint(2, "Failed to read from session %s: %r", src->label);
-			return;
+			break;
 		}
 
-		/* TODO: short writes */
-		fdwrite(dst->fd, buf, m);
-		n -= m;
+		io->iov_base = buf;
+		io->iov_len = n;
+
+		if(fdwritev(dst->fd, iop, ion) < n){
+			fprint(2, "Failed to write to session %s: %r", dst->label);
+			dst = &nilsess;
+		}
+		
+		iop = io;
+		ion = 1;
 	}
 
 	taskstate("");
