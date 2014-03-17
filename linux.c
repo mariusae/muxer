@@ -1,0 +1,76 @@
+#include "a.h"
+#include "muxer.h"
+
+#define _GNU_SOURCE
+#define __USE_GNU
+#include <fcntl.h>
+
+/* Note: may not actually buy us anything; really this is moving buffering
+ * from our allocated ones to the kernel */
+
+/* XXX - return errors */
+void
+copyframe(Session *dst, Session *src, Muxhdr *hd)
+{
+	int pfd[2];
+	uchar hdbuf[8];
+	int m, nr, nw, ntot;
+
+	if(pipe(pfd) < 0){
+		fprint(2, "pipe: %r\n");
+		src->active = 0;
+		return;
+	}
+
+	fdnoblock(pfd[0]);
+	fdnoblock(pfd[1]);
+
+	U32PUT(hdbuf, hd->siz);
+	hdbuf[4] = hd->type;
+	U24PUT(hdbuf+5, hd->tag);
+
+	if(fdwrite(dst->fd, hdbuf, 8) != 8){
+		fprint(2, "fdwrite to %s: %r\n", dst->label);
+		src->active = 0;
+		dst->active = 0;
+		return;
+	}
+
+	taskstate("splice %s->%s", src->label, dst->label);
+
+	dprint("%s->%s size %d type %d tag %d\n", 
+		src->label, dst->label, hd->siz, hd->type, hd->tag);
+
+	for(ntot=0; ntot < hd->siz-4; ntot += nr){
+		while((nr=splice(src->fd, nil, pfd[1], nil, hd->siz-4-ntot, 
+				SPLICE_F_NONBLOCK))<0 && errno == EAGAIN){
+			fdwait(src->fd, 'r');
+			fdwait(pfd[1], 'w');
+		}
+
+		if(nr<0){
+			fprint(2, "splice from %s failed: %r\n", src->label);
+			src->active = dst->active = 0;
+			goto fail;
+		}
+
+		for(nw=0; nw<nr; nw+=m){
+			while((m=splice(pfd[0], nil, dst->fd, nil, nr-nw, SPLICE_F_NONBLOCK))<0
+					&& errno == EAGAIN){
+				fdwait(pfd[0], 'r');
+				fdwait(dst->fd, 'w');
+			}
+
+			if(m<0){
+				fprint(2, "splice to %s failed: %r\n", dst->label);
+				src->active = dst->active = 0;
+				goto fail;
+			}
+		}
+	}
+
+  fail:
+	close(pfd[0]);
+	close(pfd[1]);
+}
+
