@@ -56,7 +56,7 @@ char *vseprint(char*, char*, char*, va_list);
 char *strecpy(char*, char*, char*);
 
 #define nil (void*)0
-#define dprintf(...) if(debug) fprint(2, __VA_ARGS__)
+#define dprint(...) if(debug) fprint(2, __VA_ARGS__)
 
 void* emalloc(uint n);
 

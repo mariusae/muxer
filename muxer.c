@@ -80,7 +80,7 @@ taskmain(int argc, char **argv)
 
 	while((cfd = netaccept(fd, peer, &port)) >= 0){
 		s = mksession(cfd, "client %s:%d", peer, port);
-		dprintf("new client %s\n", s->label);
+		dprint("new client %s\n", s->label);
 		readsession(s, c);
 	}
 }
@@ -141,7 +141,7 @@ brokertask(void *v)
 			copyframe(ds, mesg->s, &hd);
 		}else{	/* R-message */
 			if((tmesg = puttag(tags, mesg->hd.tag)) == nil){
-				dprintf("no T-message for tag %d\n", mesg->hd.tag);
+				dprint("no T-message for tag %d\n", mesg->hd.tag);
 				copyframe(&nilsess, mesg->s, &mesg->hd);
 				chansendp(mesg->donec, mesg);
 				continue;
@@ -200,7 +200,7 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 	buf[4] = hd->type;
 	U24PUT(buf+5, hd->tag);
 	
-	dprintf("%s->%s size %d type %d tag %d\n", 
+	dprint("%s->%s size %d type %d tag %d\n", 
 		src->label, dst->label, hd->siz, hd->type, hd->tag);
 
 	taskstate("%s->%s header tag %d size %d\n", 
