@@ -5,7 +5,8 @@ static void servestatustask(void *v);
 static void writestats(int fd);
 
 Stats stats = {
-	.nreq = 0
+	.nreq = 0,
+	.nsess = 0
 };
 
 void
@@ -44,4 +45,5 @@ writestats(int fd)
 	fdprint(fd, "Content-Type: text\r\n");
 	fdprint(fd, "Connection: close\r\n\r\n");
 	fdprint(fd, "nreq %d\n", stats.nreq);
+	fdprint(fd, "nsess %d\n", stats.nsess);
 }

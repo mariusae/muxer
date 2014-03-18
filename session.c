@@ -56,8 +56,10 @@ readsessiontask(void *v)
 
 	sp = s;
 	spp = &sp;
+	
+	stats.nsess++;
 
-	taskname("read %s", s->label);
+	taskname("session[read] %s", s->label);
 
 	while(s->active){
 		qlock(&lk);
@@ -82,6 +84,10 @@ readsessiontask(void *v)
 		chansendp(c, m);
 		dtaskstate("waiting for done signal");
 	}
+	
+	dprint("Session %s died\n", s->label);
+
+	stats.nsess--;
 
 	sp = &nilsess;
 	s->active = 0;

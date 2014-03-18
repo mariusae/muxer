@@ -82,6 +82,7 @@ typedef
 struct Stats
 {
 	int nreq;
+	int nsess;
 } Stats;
 extern Stats stats;
 
