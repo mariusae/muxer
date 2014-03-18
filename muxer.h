@@ -81,8 +81,8 @@ struct Muxmesg
 typedef
 struct Stats
 {
-	int nreq;
-	int nsess;
+	uint64 nreq;
+	uint64 nsess;
 } Stats;
 extern Stats stats;
 
