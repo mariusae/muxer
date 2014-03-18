@@ -122,7 +122,7 @@ brokertask(void *v)
 	taskname("broker");
 
 	for(;;){
-		taskstate("waiting for message");
+		dtaskstate("waiting for message");
 		mesg = chanrecvp(c);
 
 		if(mesg->hd.tag == 0 || mesg->hd.type == 0){

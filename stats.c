@@ -30,7 +30,7 @@ servestatustask(void *v)
 			break;
 		}
 		
-		taskstate("serving %s at %d", peer, port);
+		dtaskstate("serving %s at %d", peer, port);
 
 		writestats(cfd);
 		close(cfd);

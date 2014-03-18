@@ -36,7 +36,7 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 		return;
 	}
 
-	taskstate("splice %s->%s", src->label, dst->label);
+	dtaskstate("splice %s->%s", src->label, dst->label);
 
 	dprint("%s->%s size %d type %d tag %d\n", 
 		src->label, dst->label, hd->siz, hd->type, hd->tag);

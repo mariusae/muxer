@@ -1,6 +1,7 @@
 #include "a.h"
 #include <sys/uio.h>
 
+
 void*
 emalloc(uint n)
 {
@@ -86,4 +87,16 @@ fdprint(int fd, char *fmt, ...)
 	va_end(arg);
 	
 	return fdwrite(fd, buf, strlen(buf));
+}
+
+void
+_dtaskstate(char *fmt, ...)
+{
+	va_list arg;
+
+	fprint(2, "task %s: ", taskgetname());
+	va_start(arg, fmt);
+	vfprint(2, fmt, arg);
+	va_end(arg);
+	fprint(2, "\n");
 }

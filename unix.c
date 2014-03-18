@@ -24,7 +24,7 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 	dprint("%s->%s size %d type %d tag %d\n", 
 		src->label, dst->label, hd->siz, hd->type, hd->tag);
 
-	taskstate("%s->%s frame tag %d size %d\n", 
+	dtaskstate("%s->%s frame tag %d size %d\n", 
 		src->label, dst->label, hd->tag, hd->siz);
 
 	for(tot=0; tot<hd->siz-4; tot+=n){
@@ -54,5 +54,5 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 		ion = 1;
 	}
 
-	taskstate("");
+	dtaskstate("");
 }

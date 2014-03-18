@@ -55,8 +55,11 @@ char *vsnprint(char*, uint, char*, va_list);
 char *vseprint(char*, char*, char*, va_list);
 char *strecpy(char*, char*, char*);
 
+void _dtaskstate(char *fmt, ...);
+
 #define nil (void*)0
 #define dprint(...) if(debug) fprint(2, __VA_ARGS__)
+#define dtaskstate(...) if(!debug) taskstate(__VA_ARGS__); else {taskstate(__VA_ARGS__); _dtaskstate(__VA_ARGS__); }
 
 void* emalloc(uint n);
 

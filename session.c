@@ -61,7 +61,7 @@ readsessiontask(void *v)
 
 	while(s->active){
 		qlock(&lk);
-		taskstate("reading frame header");
+		dtaskstate("reading frame header");
 		if(fdreadn(s->fd, hd, 8) != 8)
 			break;
 
@@ -80,7 +80,7 @@ readsessiontask(void *v)
 		m->sp = spp;
 
 		chansendp(c, m);
-		taskstate("waiting for done signal");
+		dtaskstate("waiting for done signal");
 	}
 
 	sp = &nilsess;
