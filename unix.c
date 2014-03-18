@@ -21,9 +21,6 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 	iop = iov;
 	ion = 2;
 
-	dprint("%s->%s size %d type %d tag %d\n", 
-		src->label, dst->label, hd->siz, hd->type, hd->tag);
-
 	dtaskstate("%s->%s frame tag %d size %d\n", 
 		src->label, dst->label, hd->tag, hd->siz);
 

@@ -94,7 +94,6 @@ taskmain(int argc, char **argv)
 
 	while((cfd = netaccept(fd, peer, &port)) >= 0){
 		s = mksession(cfd, "client %s:%d", peer, port);
-		dprint("new client %s\n", s->label);
 		readsession(s, c);
 	}
 }
