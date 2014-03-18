@@ -17,15 +17,15 @@ Session nilsess;
 void
 usage()
 {
-	fprint(2, "usage: %s [-a announceaddr] [-D] destaddr\n", argv0);
+	fprint(2, "usage: %s [-a announceaddr] [-s statsaddr] [-D] destaddr\n", argv0);
 	taskexitall(1);
 }
 
 void
 taskmain(int argc, char **argv)
 {
-	int fd, cfd, aport, dport, port;
-	char *aaddr, *daddr, peer[16];
+	int fd, cfd, sfd, aport, dport, port, sport;
+	char *aaddr, *daddr, *saddr, peer[16];
 	Session *ds, *s;
 	Channel *c;
 	void **args;
@@ -36,6 +36,9 @@ taskmain(int argc, char **argv)
 	ds = nil;
 	aaddr = "*";
 	aport = 14041;
+	
+	saddr = "*";
+	sport = 14040;
 
 	ARGBEGIN{
 	case 'D':
@@ -44,6 +47,11 @@ taskmain(int argc, char **argv)
 	case 'a':
 		aaddr = EARGF(usage());
 		if((aport = netmunge(&aaddr)) < 0)
+			usage();
+		break;
+	case 's':
+		saddr = EARGF(usage());
+		if((sport = netmunge(&saddr)) < 0)
 			usage();
 		break;
 	case 'h':
@@ -56,6 +64,12 @@ taskmain(int argc, char **argv)
 	daddr = argv[0];
 	if((dport = netmunge(&daddr)) < 0)
 		usage();
+		
+	if((sfd = netannounce(TCP, saddr, sport)) < 0){
+		fprint(2, "announce %s:%d failed: %r\n", saddr, sport);
+		taskexitall(1);
+	}
+	servestatus(sfd);
 
 	if ((fd = netdial(TCP, daddr, dport)) < 0){
 		fprint(2, "dst %s:%d unreachable\n", daddr, dport);
@@ -150,6 +164,8 @@ brokertask(void *v)
 			hd.tag = tmesg->hd.tag;
 
 			copyframe(*tmesg->sp, *mesg->sp, &hd);
+			
+			stats.nreq++;
 
 			free(mesg);
 			free(tmesg);

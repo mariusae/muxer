@@ -74,3 +74,16 @@ fdwritev(int fd, struct iovec *_iov, int iovn)
 	
 	return tot;
 }
+
+int
+fdprint(int fd, char *fmt, ...)
+{
+	char buf[256];
+	va_list arg;
+	
+	va_start(arg, fmt);
+	vseprint(buf, buf+sizeof buf, fmt, arg);
+	va_end(arg);
+	
+	return fdwrite(fd, buf, strlen(buf));
+}

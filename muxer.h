@@ -78,5 +78,14 @@ struct Muxmesg
 	Session **sp;
 } Muxmesg;
 
+typedef
+struct Stats
+{
+	int nreq;
+} Stats;
+extern Stats stats;
+
+void servestatus(int fd);
+
 
 void copyframe(Session *dst, Session *src, Muxhdr *hd);

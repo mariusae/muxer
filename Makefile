@@ -11,7 +11,7 @@ CFLAGS =  -Wall -g -Ilibtask
 
 all: muxer
 
-OFILES=u.o prot.o session.o tags.o $(OSYS)
+OFILES=u.o prot.o session.o tags.o stats.o $(OSYS)
 HFILES=a.h arg.h muxer.h 
 LIB=libtask/libtask.a
 
