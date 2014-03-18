@@ -52,15 +52,16 @@ void* puttag(Tags *t, uint tag);
 typedef
 struct Session
 {
-	char label[64];
-	int active;
+	char label[128];
+	int ok;
 	int fd;
 } Session;
 
-extern Session nilsess;
+extern Session *nilsess;
 
-Session* mksession(int fd, char *fmt, ...);
-void readsession(Session *s, Channel *c);
+void sessinit();
+Session* sesscreate(int fd, Channel *c, char *fmt, ...);
+void sessfatal(Session *s, char *fmt, ...);
 
 typedef
 struct Muxhdr

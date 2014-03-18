@@ -1,41 +1,69 @@
 #include "a.h"
 #include "muxer.h"
 #include <task.h>
+#include <fcntl.h>
 
-static void readsessiontask(void *v);
+Session *nilsess;
+
+static void readtask(void *v);
+
+void
+sessinit()
+{
+	nilsess = emalloc(sizeof *nilsess);
+	strecpy(nilsess->label, nilsess->label+sizeof nilsess->label, "nil");
+	nilsess->fd = open("/dev/null", O_RDWR);
+}
 
 Session*
-mksession(int fd, char *fmt, ...)
+sesscreate(int fd, Channel *c, char *fmt, ...)
 {
 	Session *s;
 	va_list arg;
+	void **args;
 
 	s = emalloc(sizeof(Session));
 	s->fd = fd;
+	s->ok = 1;
 
 	va_start(arg, fmt);
 	vsnprint(s->label, sizeof s->label, fmt, arg);
 	va_end(arg);
 	
-	s->active = 1;
-
-	return s;
-}
-
-void
-readsession(Session *s, Channel *c)
-{
-	void **args;
+	dprint("new session %s\n", s->label);
 
 	args = emalloc(2*sizeof(void*));
 	args[0] = s;
 	args[1] = c;
 
-	taskcreate(readsessiontask, args, STACK);
+	taskcreate(readtask, args, STACK);
+
+	return s;
 }
 
+void
+sessfatal(Session *s, char *fmt, ...)
+{
+	char buf[64];
+	va_list arg;
+	
+	if(s == nilsess)
+		return;
+
+	va_start(arg, fmt);
+	vsnprint(buf, sizeof buf, fmt, arg);
+	va_end(arg);
+
+	s->ok = 0;
+
+	dprint("Session %s failed: %s\n", s->label, buf);
+
+	snprint(s->label, sizeof s->label, "%s [failed: %s]", s->label, buf);
+}
+
+
 static void
-readsessiontask(void *v)
+readtask(void *v)
 {
 	/* args: */
 		Session *s;
@@ -45,7 +73,7 @@ readsessiontask(void *v)
 	Muxmesg *m;
 	Session **spp, *sp;
 	QLock lk;
-	
+
 	memset(&lk, 0, sizeof lk);
 
 	void **argv = v;
@@ -54,17 +82,19 @@ readsessiontask(void *v)
 	c = argv[1];
 	free(argv);
 
+	/* Broken: this will read a ptr off of a nonexistent stack
+	 * when we're off. */
 	sp = s;
 	spp = &sp;
-	
+
 	stats.nsess++;
 
-	taskname("session[read] %s", s->label);
+	taskname("sessread %s (fd=%d)", s->label, s->fd);
 
-	while(s->active){
+	while(s->ok){
 		qlock(&lk);
 		dtaskstate("reading frame header");
-		if(fdreadn(s->fd, hd, 8) != 8)
+		if(fdreadn(s->fd, hd, 8) < 8)
 			break;
 
 		m = emalloc(sizeof *m);
@@ -84,15 +114,16 @@ readsessiontask(void *v)
 		chansendp(c, m);
 		dtaskstate("waiting for done signal");
 	}
-	
-	dprint("Session %s died\n", s->label);
+
+	dprint("session %s died\n", s->label);
 
 	stats.nsess--;
 
-	sp = &nilsess;
-	s->active = 0;
+	sp = nilsess;
+	s->ok = 0;
 	close(s->fd);
 
-	/* Is this really our responsibility? */
+	/* It's a bit awkward that this has responsibility 
+	 * for maintaining the session struct. */
 	free(s);
 }

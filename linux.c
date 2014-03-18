@@ -16,9 +16,10 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 	uchar hdbuf[8];
 	int m, nr, nw, ntot;
 
+	/* XXX: Rerr the dst */
 	if(pipe(pfd) < 0){
 		fprint(2, "pipe: %r\n");
-		src->active = 0;
+		sessfatal(src, "%r");
 		return;
 	}
 
@@ -31,8 +32,8 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 
 	if(fdwrite(dst->fd, hdbuf, 8) != 8){
 		fprint(2, "fdwrite to %s: %r\n", dst->label);
-		src->active = 0;
-		dst->active = 0;
+		sessfatal(dst, "%r");
+		sessfatal(src, "dst: %r");
 		return;
 	}
 
@@ -48,7 +49,8 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 
 		if(nr<0){
 			fprint(2, "splice from %s failed: %r\n", src->label);
-			src->active = dst->active = 0;
+			sessfatal(src, "splice: %r");
+			sessfatal(dst, "splice: %r");
 			goto fail;
 		}
 
@@ -60,8 +62,8 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 			}
 
 			if(m<0){
-				fprint(2, "splice to %s failed: %r\n", dst->label);
-				src->active = dst->active = 0;
+				sessfatal(src, "splice: %r");
+				sessfatal(dst, "splice: %r");
 				goto fail;
 			}
 		}

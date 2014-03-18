@@ -34,8 +34,11 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 			 * trailer to indicate success or failure from middle boxes,
 			 * so that these kinds of failures may be handled gracefully,
 			 * and the recipient session not destroyed. */
-			src->active = 0;
-			fprint(2, "Failed to read from session %s: %r", src->label);
+			sessfatal(src, "%r");
+			/* We should be nicer to the destination session here. Even if
+			 * we are in the middle of a frame that we cannot complete, we
+			 * should at least hold on to it for reading pending responses. */
+			sessfatal(dst, "src: %r");
 			break;
 		}
 
@@ -43,10 +46,10 @@ copyframe(Session *dst, Session *src, Muxhdr *hd)
 		io->iov_len = n;
 
 		if(fdwritev(dst->fd, iop, ion) < n){
-			fprint(2, "Failed to write to session %s: %r", dst->label);
+			sessfatal(dst, "%r");
 			dst = &nilsess;
 		}
-		
+
 		iop = io;
 		ion = 1;
 	}
