@@ -14,7 +14,6 @@ struct Muxframe
 	uchar buf[];
 } Muxframe;
 
-
 enum
 {
 	/* Application messages */
@@ -28,13 +27,12 @@ enum
 	Tdrain = 64,
 	Rdrain = -64,
 	Tping = 65,
-	Rping = -63,
+	Rping = -65,
 	
-	Tdiscarded = -62,
-	Tlease = -61,
+	Tdiscarded = 66,
+	Tlease = -67,
 	
-	/* Could be either */
-	Rerr = 127,
+	Rerr = -128,
 	
 	Unknown = 0
 };
@@ -54,19 +52,42 @@ void* puttag(Tags *t, uint tag);
 typedef
 struct Session
 {
-	char *label;
+	char label[128];
+	int ok;
 	int fd;
 } Session;
 
-Session* mksession(int fd, char *fmt, ...);
-void freesession(Session *s);
-void readsession(Session *s, Channel *c);
+extern Session *nilsess;
+
+void sessinit();
+Session* sesscreate(int fd, Channel *c, char *fmt, ...);
+void sessfatal(Session *s, char *fmt, ...);
+
+typedef
+struct Muxhdr
+{
+	uint32 siz;
+	char type;
+	uint24 tag;
+} Muxhdr;
 
 typedef 
 struct Muxmesg
 {
-	uint origtag;
-
-	Session *s;
-	Muxframe *f;
+	Muxhdr hd;
+	QLock *locked;
+	Session **sp;
 } Muxmesg;
+
+typedef
+struct Stats
+{
+	uint64 nreq;
+	uint64 nsess;
+} Stats;
+extern Stats stats;
+
+void servestatus(int fd);
+
+
+void copyframe(Session *dst, Session *src, Muxhdr *hd);

@@ -26,7 +26,7 @@
 #define	U48PUT(p,v,t32)	t32=(v)>>32;U16PUT(p,t32);t32=(v);U32PUT((p)+2,t32)
 #define	U64PUT(p,v,t32)	t32=(v)>>32;U32PUT(p,t32);t32=(v);U32PUT((p)+4,t32)
 
-
+typedef unsigned int uint24;
 typedef unsigned int uint32;
 typedef unsigned long long uint64;
 typedef unsigned int uint;
@@ -35,10 +35,35 @@ typedef long long int64;
 typedef unsigned char uchar;
 typedef unsigned long uintptr;
 
+#define print task_print
+#define fprint task_fprint
+#define snprint task_snprint
+#define seprint task_seprint
+#define vprint task_vprint
+#define vfprint task_vfprint
+#define vsnprint task_vsnprint
+#define vseprint task_vseprint
+#define strecpy task_strecpy
+
+int print(char*, ...);
+int fprint(int, char*, ...);
+char *snprint(char*, uint, char*, ...);
+char *seprint(char*, char*, char*, ...);
+int vprint(char*, va_list);
+int vfprint(int, char*, va_list);
+char *vsnprint(char*, uint, char*, va_list);
+char *vseprint(char*, char*, char*, va_list);
+char *strecpy(char*, char*, char*);
+
+void _dtaskstate(char *fmt, ...);
+
 #define nil (void*)0
-#define dprintf(...) if(debug) fprintf(stderr, __VA_ARGS__)
+#define dprint(...) if(debug) fprint(2, __VA_ARGS__)
+#define dtaskstate(...) if(!debug) taskstate(__VA_ARGS__); else {taskstate(__VA_ARGS__); _dtaskstate(__VA_ARGS__); }
 
 void* emalloc(uint n);
 
 int netmunge(char **s);
 int fdreadn(int fd, void *buf, uint n);
+int fdwritev(int fd, struct iovec *_iov, int iovn);
+int fdprint(int fd, char *fmt, ...);
