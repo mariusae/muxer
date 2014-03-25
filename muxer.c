@@ -22,7 +22,7 @@ taskmain(int argc, char **argv)
 	int fd, cfd, aport, dport, port;
 	char *aaddr, *daddr, peer[16];
 	Session *ds, *s;
-	Channel *r;
+	Channel *c;
 	void **args;
 
 	ds = nil;
@@ -54,22 +54,26 @@ taskmain(int argc, char **argv)
 		taskexitall(1);
 	}
 
-	r = chancreate(sizeof(void*), 256);
-	ds = mksession(fd, r, "dst %s:%d", daddr, dport);
+	ds = mksession(fd, "dst %s:%d", daddr, dport);
 
 	if ((fd = netannounce(TCP, aaddr, aport)) < 0){
 		fprintf(stderr, "announce %s %d failed: %s\n", aaddr, aport, strerror(errno));
 		taskexitall(1);
 	}
 
+	c = chancreate(sizeof(void*), 256);
+
 	args = emalloc(sizeof(void*)*2);
 	args[0] = ds;
-	args[1] = r;
+	args[1] = c;
 	taskcreate(brokertask, args, STACK);
 
+	readsession(ds, c);
+
 	while((cfd = netaccept(fd, peer, &port)) >= 0){
-		s = mksession(cfd, r, "client %s:%d", peer, port);
-		dprintf("new %s\n", s->label);
+		s = mksession(cfd, "client %s:%d", peer, port);
+		dprintf("new client %s\n", s->label);
+		readsession(s, c);
 	}
 }
 
@@ -78,7 +82,7 @@ brokertask(void *v)
 {
 	/* args: */
 		Session *ds;
-		Channel *r;
+		Channel *c;
 	int stag, dtag, stype;
 	Muxmesg *sm, *m1;
 	void **argv;
@@ -87,7 +91,7 @@ brokertask(void *v)
 
 	argv = v;
 	ds = argv[0];
-	r = argv[1];
+	c = argv[1];
 	free(v);
 
 	tags = mktags((1<<24)-1);
@@ -98,7 +102,7 @@ brokertask(void *v)
 
 	for(;;){
 		taskstate("waiting for message");
-		sm = chanrecvp(r);
+		sm = chanrecvp(c);
 
 		if((stag = muxtag(sm->f)) == 0 || (stype = muxtype(sm->f)) == 0){
 			free(sm->f);
@@ -129,30 +133,28 @@ brokertask(void *v)
 
 			dprintf("%s-> tag %d->%d\n", sm->s->label, stag, dtag);
 			muxsettag(sm->f, dtag);
-			chansendp(ds->w, sm->f);
+			writeframe(ds, sm->f);
 
+			free(sm->f);
 			sm->f = nil;
 		}else{	/* R-message */
 			if(stag < 0)
-				goto skip_frame;	/* Rerr */
+				goto next;  /* Rerr */
 
 			m1 = puttag(tags, stag);
 			if(m1 == nil){
 				dprintf("unknown tag %d\n", stag);
-				goto skip_frame;
+				goto next;
 			}
 
 			dtag = m1->origtag;
 			s = m1->s;
 
 			muxsettag(sm->f, dtag);
+			writeframe(s, sm->f);
 
-			chansendp(s->w, sm->f);
-			goto next;
-
-		skip_frame:
+	next:
 			free(sm->f);
-		next:
 			free(sm);
 			free(m1);
 		}
@@ -160,6 +162,19 @@ brokertask(void *v)
 	}
 	
 	freetags(tags);
+}
+
+void
+writeframe(Session *s, Muxframe *f)
+{
+	uchar siz[4];
+	
+	taskstate("%s<- frame tag %d size %d\n", s->label, muxtag(f), f->n);
+	dprintf("%s\n", taskgetstate());
+	U32PUT(siz, f->n);
+	fdwrite(s->fd, siz, 4);
+	fdwrite(s->fd, f->buf, f->n);
+	taskstate("");
 }
 
 void
@@ -176,5 +191,6 @@ writeerr(Session *s, uint32 tag, char *fmt, ...)
 	f->n = 4 + vsnprintf((char*)f->buf+4, f->n-4, fmt, arg);
 	va_end(arg);
 
-	chansendp(s->w, f);
+
+	writeframe(s, f);
 }

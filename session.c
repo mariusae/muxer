@@ -2,13 +2,10 @@
 #include "muxer.h"
 #include <task.h>
 
-static void readsession(Session*);
 static void readsessiontask(void *v);
-static void writesession(Session*);
-static void writesessiontask(void *v);
 
 Session*
-mksession(int fd, Channel* r, char *fmt, ...)
+mksession(int fd, char *fmt, ...)
 {
 	Session *s;
 	va_list arg;
@@ -21,30 +18,24 @@ mksession(int fd, Channel* r, char *fmt, ...)
 	vsnprintf(s->label, 256, fmt, arg);
 	va_end(arg);
 
-	s->r = r;
-	s->w = chancreate(sizeof(void*), 256);
-
-	readsession(s);
-	writesession(s);
-
 	return s;
 }
 
 void
 freesession(Session *s)
 {
-	chansendp(s->w, nil);
 	free(s->label);
 	free(s);
 }
 
 void
-readsession(Session *s)
+readsession(Session *s, Channel *c)
 {
 	void **args;
 
-	args = emalloc(1*sizeof(void*));
+	args = emalloc(2*sizeof(void*));
 	args[0] = s;
+	args[1] = c;
 
 	taskcreate(readsessiontask, args, STACK);
 }
@@ -54,6 +45,7 @@ readsessiontask(void *v)
 {
 	/* args: */
 		Session *s;
+		Channel *c;
 
 	uchar siz[4];
 	uint n;
@@ -62,6 +54,7 @@ readsessiontask(void *v)
 	void **argv = v;
 
 	s = argv[0];
+	c = argv[1];
 	free(argv);
 	
 	taskname("read %s", s->label);
@@ -90,57 +83,10 @@ readsessiontask(void *v)
 		dprintf("%s-> read frame size %d\n", s->label, n);
 
 		taskstate("sending message");
-		chansendp(s->r, m);
+		chansendp(c, m);
 	}
 
 err:
 	if(0)
 		;
-}
-
-void
-writesession(Session *s)
-{
-	void **args;
-
-	args = emalloc(1*sizeof(void*));
-	args[0] = s;
-
-	taskcreate(writesessiontask, args, STACK);
-}
-
-static void
-writesessiontask(void *v)
-{
-	/* args: */
-		Session *s;
-
-	uchar siz[4];
-	Muxframe *f;
-
-	void **argv = v;
-
-	s = argv[0];
-	free(argv);
-
-	taskname("write %s", s->label);
-
-	for(;;){
-		/* Receive a frame, write a frame */
-		f = chanrecvp(s->w);
-		if(f == nil){
-			break;
-		}
-
-		taskstate("%s<- frame tag %d size %d\n", s->label, muxtag(f), f->n);
-		dprintf("%s\n", taskgetstate());
-		U32PUT(siz, f->n);
-		fdwrite(s->fd, siz, 4);
-		fdwrite(s->fd, f->buf, f->n);
-		taskstate("");
-
-		free(f);
-	}
-
-	free(s->w);
 }
