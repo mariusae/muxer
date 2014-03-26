@@ -1,46 +1,15 @@
+
+#include "mux.h"
+
 extern char* argv0;
 extern int debug;
 
 enum
 {
-	STACK = 32768
+	STACK = 32768,
+  READAHEAD = 1024,
 };
 
-
-typedef
-struct Muxframe
-{
-	uint n;
-	uchar buf[];
-} Muxframe;
-
-enum
-{
-	/* Application messages */
-	Treq = 1,
-	Rreq = -1,
-
-	Tdispatch = 2,
-	Rdispatch = -2,
-
-	/* Control messages */
-	Tdrain = 64,
-	Rdrain = -64,
-	Tping = 65,
-	Rping = -65,
-	
-	Tdiscarded = 66,
-	Tlease = -67,
-	
-	Rerr = -128,
-	
-	Unknown = 0
-};
-
-char muxtype(Muxframe *f);
-int32 muxtag(Muxframe *f);
-int muxsettype(Muxframe *f, char type);
-int muxsettag(Muxframe *f, uint32 tag);
 
 typedef struct Tags Tags;
 
@@ -53,6 +22,14 @@ typedef
 struct Session
 {
 	char label[128];
+  // output for messages read by this session
+  Channel* read_messages;
+  // input for messages written to this session
+  Channel* messages_to_write;
+  // output to request an fdwait on this fd
+  Channel* request_fdwait;
+  // input for fdwait having returned for this fd
+  Channel* fd_writable;
 	int ok;
 	int fd;
 } Session;
@@ -63,18 +40,10 @@ void sessinit();
 Session* sesscreate(int fd, Channel *c, char *fmt, ...);
 void sessfatal(Session *s, char *fmt, ...);
 
-typedef
-struct Muxhdr
-{
-	uint32 siz;
-	char type;
-	uint24 tag;
-} Muxhdr;
-
 typedef 
 struct Muxmesg
 {
-	Muxhdr hd;
+	mux_msg_t msg;
 	QLock *locked;
 	Session **sp;
 } Muxmesg;
@@ -88,6 +57,3 @@ struct Stats
 extern Stats stats;
 
 void servestatus(int fd);
-
-
-void copyframe(Session *dst, Session *src, Muxhdr *hd);

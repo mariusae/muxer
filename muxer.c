@@ -6,7 +6,6 @@ char* argv0;
 int debug = 0;
 
 void brokertask(void *v);
-void writeheader(Session *s, Muxhdr *h);
 void writeerr(Session *s, uint32 tag, char *fmt, ...);
 void writeframe(Session *dst, Muxhdr *hd, char *buf);
 
@@ -97,7 +96,6 @@ brokertask(void *v)
 	Muxmesg *mesg, *tmesg;
 	void **argv;
 	Tags *tags;
-	Muxhdr hd;
 
 	argv = v;
 	ds = argv[0];
@@ -113,34 +111,33 @@ brokertask(void *v)
 		dtaskstate("waiting for message");
 		mesg = chanrecvp(c);
 
-		if(mesg->hd.tag == 0 || mesg->hd.type == 0){
-			copyframe(nilsess, *mesg->sp, &mesg->hd);
+		if(mesg->msg.tag == 0 || mesg->msg.type == 0){
+			copyframe(nilsess, *mesg->sp, &mesg->msg);
 			goto next;
 		}
 
-		if(abs(mesg->hd.type) >= 64){
+		if(abs(mesg->msg.type) >= 64){
 			/* XXX this can block the broker if the frame 
 			 * is malformed; shunt into another thread */
-			copyframe(nilsess, *mesg->sp, &mesg->hd);
+			copyframe(nilsess, *mesg->sp, &mesg->msg);
 
-			if(mesg->hd.type > 0){
-				writeerr(*mesg->sp, mesg->hd.tag, 
-					"Unknown control message %d", mesg->hd.type);
+			if(mesg->msg.type > 0){
+				writeerr(*mesg->sp, mesg->msg.tag, 
+					"Unknown control message %d", mesg->msg.type);
 			}
 
 			goto next;
 		}
 
-		if(mesg->hd.type > 0){	/* T-message */
+		if(mesg->msg.type > 0){	/* T-message */
 			if((tag = nexttag(tags, mesg)) < 0){
-				copyframe(nilsess, *mesg->sp, &mesg->hd);
-				writeerr(*mesg->sp, mesg->hd.tag, "tags exhausted");
+				copyframe(nilsess, *mesg->sp, &mesg->msg);
+				writeerr(*mesg->sp, mesg->msg.tag, "tags exhausted");
 				qunlock(mesg->locked);
-				free(mesg);
 				continue;
 			}
 
-			hd = mesg->hd;
+			hd = mesg->msg;
 			hd.tag = tag;
 
 			/* XXX check sessions ok */
@@ -149,14 +146,14 @@ brokertask(void *v)
 			mesg->locked = nil;
 			mesg = nil;
 		}else{	/* R-message */
-			if((tmesg = puttag(tags, mesg->hd.tag)) == nil){
-				dprint("no T-message for tag %d\n", mesg->hd.tag);
-				copyframe(nilsess, *mesg->sp, &mesg->hd);
+			if((tmesg = puttag(tags, mesg->msg.tag)) == nil){
+				dprint("no T-message for tag %d\n", mesg->msg.tag);
+				copyframe(nilsess, *mesg->sp, &mesg->msg);
 				goto next;
 			}
 
-			hd = mesg->hd;
-			hd.tag = tmesg->hd.tag;
+			hd = mesg->msg;
+			hd.tag = tmesg->msg.tag;
 
 			/* XXX check sessions ok */
 			copyframe(*tmesg->sp, *mesg->sp, &hd);
@@ -168,7 +165,6 @@ brokertask(void *v)
   next:
 		if(mesg != nil){
 			qunlock(mesg->locked);
-			free(mesg);
 		}
 	}
 
@@ -194,7 +190,7 @@ writeerr(Session *s, uint32 tag, char *fmt, ...)
 }
 
 void
-writeframe(Session *dst, Muxhdr *hd, char *buf)
+writemessage(Session *dst, mux_msg_t *hd)
 {
 	uchar hdbuf[8];
 
