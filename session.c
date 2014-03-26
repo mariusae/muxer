@@ -124,10 +124,13 @@ readtask(void *v)
       fdwait(s->fd, 'r');
 		  dtaskstate("reading");
       // read the max of the requested amount or the readahead amount
-      read = read < READAHEAD ? READAHEAD : read;
+      read = -read < READAHEAD ? READAHEAD : -read;
       buf_t* buf = session_append_alloc(session, read);
       // read, and truncate to the actual read amount
       read = fdread(s->fd, buf->data, buf->size);
+      if (read <= 0) {
+        goto session_finished;
+      }
       buf_trim(buf, 0, read);
     }
 
@@ -140,6 +143,8 @@ readtask(void *v)
 		chansendp(s->read_messages, m);
 		dtaskstate("waiting for done signal");
 	}
+
+session_finished:
 
 	dprint("session %s died\n", s->label);
 
@@ -205,10 +210,10 @@ writetask(void *v)
 
     switch (chanalt(alts)) {
     case 0:
-      // message was received
       if (msg == nil) {
         goto finished;
       }
+      // message was received
       mux_msg_encode(session, msg);
       mux_msg_destroy(msg);
       break;
@@ -220,7 +225,7 @@ writetask(void *v)
       // execute a writev that attempts to flush the entire session
       bufcount = session_bufcount(session);
       iovecs = emalloc(sizeof(struct iovec) * bufcount);
-      for (i = session->head; i < session->tail; i++) {
+      for (i = 0; i < bufcount; i++) {
         buf = session_buf(session, session->head + i);
         iovecs[i].iov_base = buf->data;
         iovecs[i].iov_len = buf->size;
@@ -264,13 +269,8 @@ writabletask(void *v)
 	taskname("sesswritable %s (fd=%d)", s->label, s->fd);
 
 	while(s->ok){
-		//dtaskstate("waiting to be asked to fdwait");
     if (chanrecvp(s->request_fdwait) == nil) break;
-
-		//dtaskstate("fdwaiting");
     fdwait(s->fd, 'w');
-
-		//dtaskstate("signaling that fd is writable");
 		chansend(s->fd_writable, nil);
 	}
 

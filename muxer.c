@@ -69,6 +69,7 @@ taskmain(int argc, char **argv)
 		fprint(2, "dst %s:%d unreachable\n", daddr, dport);
 		taskexitall(1);
 	}
+  fdnoblock(fd);
 	c = chancreate(sizeof(void*), 256);
 	ds = sesscreate(fd, c, "dst %s:%d", daddr, dport);
 	
@@ -76,14 +77,17 @@ taskmain(int argc, char **argv)
 		fprint(2, "announce %s:%d failed: %r\n", aaddr, aport);
 		taskexitall(1);
 	}
+  fdnoblock(fd);
 
 	args = emalloc(sizeof(void*)*2);
 	args[0] = ds;
 	args[1] = c;
 	taskcreate(brokertask, args, STACK);
 
-	while((cfd = netaccept(fd, peer, &port)) >= 0)
+	while((cfd = netaccept(fd, peer, &port)) >= 0) {
+    fdnoblock(cfd);
 		sesscreate(cfd, c, "client %s:%d", peer, port);
+  }
 }
 
 void
