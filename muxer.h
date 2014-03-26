@@ -7,7 +7,7 @@ extern int debug;
 enum
 {
 	STACK = 32768,
-  READAHEAD = 1024,
+	READAHEAD = 1024,
 };
 
 
@@ -22,14 +22,14 @@ typedef
 struct Session
 {
 	char label[128];
-  // output for messages read by this session
-  Channel* read_messages;
-  // input for messages written to this session
-  Channel* messages_to_write;
-  // output to request an fdwait on this fd
-  Channel* request_fdwait;
-  // input for fdwait having returned for this fd
-  Channel* fd_writable;
+	// output for messages read by this session
+	Channel* read_messages;
+	// input for messages written to this session
+	Channel* messages_to_write;
+	// output to request an fdwait on this fd
+	Channel* request_fdwait;
+	// input for fdwait having returned for this fd
+	Channel* fd_writable;
 	int ok;
 	int fd;
 } Session;
@@ -51,7 +51,7 @@ struct Muxmesg
 typedef 
 struct Tmesg
 {
-  tag_t tag;
+	tag_t tag;
 	Session **sp;
 } Tmesg;
 

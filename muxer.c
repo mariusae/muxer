@@ -69,7 +69,7 @@ taskmain(int argc, char **argv)
 		fprint(2, "dst %s:%d unreachable\n", daddr, dport);
 		taskexitall(1);
 	}
-  fdnoblock(fd);
+	fdnoblock(fd);
 	c = chancreate(sizeof(void*), 256);
 	ds = sesscreate(fd, c, "dst %s:%d", daddr, dport);
 	
@@ -77,7 +77,7 @@ taskmain(int argc, char **argv)
 		fprint(2, "announce %s:%d failed: %r\n", aaddr, aport);
 		taskexitall(1);
 	}
-  fdnoblock(fd);
+	fdnoblock(fd);
 
 	args = emalloc(sizeof(void*)*2);
 	args[0] = ds;
@@ -85,9 +85,9 @@ taskmain(int argc, char **argv)
 	taskcreate(brokertask, args, STACK);
 
 	while((cfd = netaccept(fd, peer, &port)) >= 0) {
-    fdnoblock(cfd);
+		fdnoblock(cfd);
 		sesscreate(cfd, c, "client %s:%d", peer, port);
-  }
+	}
 }
 
 void
@@ -117,8 +117,8 @@ brokertask(void *v)
 		mesg = chanrecvp(c);
 
 		if(mesg->msg->tag == 0 || mesg->msg->type == 0){
-      // hm, what?
-      assert( -1 );
+			// hm, what?
+			assert( -1 );
 			goto next;
 		}
 
@@ -127,46 +127,46 @@ brokertask(void *v)
 				writeerr(*mesg->sp, mesg->msg, 
 					"Unknown control message %d", mesg->msg->type);
 			} else {
-        // ignored
-        mux_msg_destroy(mesg->msg);
-      }
+				// ignored
+				mux_msg_destroy(mesg->msg);
+			}
 			goto next;
 		}
 
 		if(mesg->msg->type > 0){	/* T-message */
-      tmesg = emalloc(sizeof(Tmesg));
-      tmesg->tag = mesg->msg->tag;
-      tmesg->sp = mesg->sp;
+			tmesg = emalloc(sizeof(Tmesg));
+			tmesg->tag = mesg->msg->tag;
+			tmesg->sp = mesg->sp;
 			if((tag = nexttag(tags, tmesg)) < 0){
-        free(tmesg);
+				free(tmesg);
 				writeerr(*mesg->sp, mesg->msg, "tags exhausted");
-        goto next;
+				goto next;
 			}
 
 			mesg->msg->tag = tag;
 
 			/* XXX check sessions ok */
 			writemsg(ds, mesg->msg);
-      goto next;
+			goto next;
 		}else{	/* R-message */
 			if((tmesg = puttag(tags, mesg->msg->tag)) == nil){
 				dprint("no T-message for tag %d\n", mesg->msg->tag);
-        mux_msg_destroy(mesg->msg);
+				mux_msg_destroy(mesg->msg);
 				goto next;
 			}
 
 			/* XXX check sessions ok */
 			mesg->msg->tag = tmesg->tag;
-      writemsg(*tmesg->sp, mesg->msg);
+			writemsg(*tmesg->sp, mesg->msg);
 			free(tmesg);
 
 			stats.nreq++;
 		}
 
-  next:
+	next:
 		if(mesg != nil){
 			qunlock(mesg->locked);
-      mesg = nil;
+			mesg = nil;
 		}
 	}
 
@@ -181,12 +181,12 @@ void
 writeerr(Session *s, mux_msg_t* msg, char *fmt, ...)
 {
 	va_list arg;
-  rerr_t* rerr;
+	rerr_t* rerr;
 
-  mux_msg_reset(msg);
-  msg->type = Rerr;
-  rerr = &msg->msg.rerr;
-  buf_alloc(&rerr->error, 128);
+	mux_msg_reset(msg);
+	msg->type = Rerr;
+	rerr = &msg->msg.rerr;
+	buf_alloc(&rerr->error, 128);
 
 	va_start(arg, fmt);
 	vsnprint((char*)rerr->error.data, rerr->error.size, fmt, arg);
@@ -198,5 +198,5 @@ writeerr(Session *s, mux_msg_t* msg, char *fmt, ...)
 void
 writemsg(Session *s, mux_msg_t* msg)
 {
-  chansendp(s->messages_to_write, msg);
+	chansendp(s->messages_to_write, msg);
 }
