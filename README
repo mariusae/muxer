@@ -1,2 +1,1 @@
-Muxer is a multiplexing forwarder for Mux
-
+Muxer muxes Mux messages from Mux clients to Mux servers.
