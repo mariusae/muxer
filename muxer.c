@@ -6,8 +6,8 @@ char* argv0;
 int debug = 0;
 
 void brokertask(void *v);
-void writeerr(Session *s, uint32 tag, char *fmt, ...);
-void writeframe(Session *dst, Muxhdr *hd, char *buf);
+void writeerr(Session *dst, mux_msg_t* msg, char *fmt, ...);
+void writemsg(Session *dst, mux_msg_t* msg);
 
 void
 usage()
@@ -93,7 +93,8 @@ brokertask(void *v)
 		Session *ds;
 		Channel *c;
 	int tag;
-	Muxmesg *mesg, *tmesg;
+	Muxmesg *mesg;
+	Tmesg *tmesg;
 	void **argv;
 	Tags *tags;
 
@@ -111,93 +112,87 @@ brokertask(void *v)
 		dtaskstate("waiting for message");
 		mesg = chanrecvp(c);
 
-		if(mesg->msg.tag == 0 || mesg->msg.type == 0){
-			copyframe(nilsess, *mesg->sp, &mesg->msg);
+		if(mesg->msg->tag == 0 || mesg->msg->type == 0){
+      // hm, what?
+      assert( -1 );
 			goto next;
 		}
 
-		if(abs(mesg->msg.type) >= 64){
-			/* XXX this can block the broker if the frame 
-			 * is malformed; shunt into another thread */
-			copyframe(nilsess, *mesg->sp, &mesg->msg);
-
-			if(mesg->msg.type > 0){
-				writeerr(*mesg->sp, mesg->msg.tag, 
-					"Unknown control message %d", mesg->msg.type);
-			}
-
+		if(abs(mesg->msg->type) >= 64){
+			if(mesg->msg->type > 0){
+				writeerr(*mesg->sp, mesg->msg, 
+					"Unknown control message %d", mesg->msg->type);
+			} else {
+        // ignored
+        mux_msg_destroy(mesg->msg);
+      }
 			goto next;
 		}
 
-		if(mesg->msg.type > 0){	/* T-message */
-			if((tag = nexttag(tags, mesg)) < 0){
-				copyframe(nilsess, *mesg->sp, &mesg->msg);
-				writeerr(*mesg->sp, mesg->msg.tag, "tags exhausted");
-				qunlock(mesg->locked);
-				continue;
+		if(mesg->msg->type > 0){	/* T-message */
+      tmesg = emalloc(sizeof(Tmesg));
+      tmesg->tag = mesg->msg->tag;
+      tmesg->sp = mesg->sp;
+			if((tag = nexttag(tags, tmesg)) < 0){
+        free(tmesg);
+				writeerr(*mesg->sp, mesg->msg, "tags exhausted");
+        goto next;
 			}
 
-			hd = mesg->msg;
-			hd.tag = tag;
+			mesg->msg->tag = tag;
 
 			/* XXX check sessions ok */
-			copyframe(ds, *mesg->sp, &hd);
-			qunlock(mesg->locked);
-			mesg->locked = nil;
-			mesg = nil;
+			writemsg(ds, mesg->msg);
+      goto next;
 		}else{	/* R-message */
-			if((tmesg = puttag(tags, mesg->msg.tag)) == nil){
-				dprint("no T-message for tag %d\n", mesg->msg.tag);
-				copyframe(nilsess, *mesg->sp, &mesg->msg);
+			if((tmesg = puttag(tags, mesg->msg->tag)) == nil){
+				dprint("no T-message for tag %d\n", mesg->msg->tag);
+        mux_msg_destroy(mesg->msg);
 				goto next;
 			}
 
-			hd = mesg->msg;
-			hd.tag = tmesg->msg.tag;
-
 			/* XXX check sessions ok */
-			copyframe(*tmesg->sp, *mesg->sp, &hd);
+			mesg->msg->tag = tmesg->tag;
+      writemsg(*tmesg->sp, mesg->msg);
+			free(tmesg);
 
 			stats.nreq++;
-			free(tmesg);
 		}
 
   next:
 		if(mesg != nil){
 			qunlock(mesg->locked);
+      mesg = nil;
 		}
 	}
 
 	freetags(tags);
 }
 
+/**
+ * Resets the given msg (with a valid tag) as an error, and sends it on the
+ * given Session.
+ */
 void
-writeerr(Session *s, uint32 tag, char *fmt, ...)
+writeerr(Session *s, mux_msg_t* msg, char *fmt, ...)
 {
 	va_list arg;
-	char buf[64];
-	Muxhdr hd;
+  rerr_t* rerr;
+
+  mux_msg_reset(msg);
+  msg->type = Rerr;
+  rerr = &msg->msg.rerr;
+  buf_alloc(&rerr->error, 128);
 
 	va_start(arg, fmt);
-	vsnprint(buf, sizeof buf, fmt, arg);
+	vsnprint((char*)rerr->error.data, rerr->error.size, fmt, arg);
 	va_end(arg);
 
-	hd.siz = strlen(buf);
-	hd.type = Rerr;
-	hd.tag = tag;
-
-	writeframe(s, &hd, buf);
+	writemsg(s, msg);
 }
 
 void
-writemessage(Session *dst, mux_msg_t *hd)
+writemsg(Session *s, mux_msg_t* msg)
 {
-	uchar hdbuf[8];
-
-	U32PUT(hdbuf, hd->siz);
-	hdbuf[4] = hd->type;
-	U24PUT(hdbuf+5, hd->tag);
-
-	fdwrite(dst->fd, hdbuf, sizeof hdbuf);
-	fdwrite(dst->fd, buf, hd->siz);
+  chansendp(s->messages_to_write, msg);
 }

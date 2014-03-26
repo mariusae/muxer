@@ -43,10 +43,17 @@ void sessfatal(Session *s, char *fmt, ...);
 typedef 
 struct Muxmesg
 {
-	mux_msg_t msg;
+	mux_msg_t* msg;
 	QLock *locked;
 	Session **sp;
 } Muxmesg;
+
+typedef 
+struct Tmesg
+{
+  tag_t tag;
+	Session **sp;
+} Tmesg;
 
 typedef
 struct Stats

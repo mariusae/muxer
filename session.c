@@ -1,11 +1,14 @@
 #include "a.h"
 #include "muxer.h"
-#include <task.h>
 #include <fcntl.h>
+#include <task.h>
+#include <sys/uio.h>
 
 Session *nilsess;
 
 static void readtask(void *v);
+static void writetask(void *v);
+static void writabletask(void *v);
 
 void
 sessinit()
@@ -82,12 +85,10 @@ readtask(void *v)
 	/* args: */
 		Session *s;
 
-	uchar hd[8];
 	Muxmesg *m;
 	Session **spp, *sp;
 	QLock lk;
-  session_t session;
-  buf_t* buf;
+  session_t* session;
   int read;
 
 	memset(&lk, 0, sizeof lk);
@@ -104,8 +105,7 @@ readtask(void *v)
 	sp = s;
 	spp = &sp;
 
-  // reusable message: this task waits until the broker has reset the message
-  // before proceeding
+  // reusable Muxmesg: this task waits until the broker unlocks before sending the next
 	m = emalloc(sizeof *m);
 	m->sp = spp;
 	m->locked = &lk;
@@ -116,25 +116,26 @@ readtask(void *v)
 
 	while(s->ok){
 		qlock(&lk);
-    mux_msg_reset(mesg->msg);
-		dtaskstate("reading");
+    m->msg = emalloc(sizeof(mux_msg_t));
 
     // read while there is not a message available
     while ((read = mux_msg_prepare(m->msg, session)) < 0) {
-      fdwait(fs, 'r');
+		  dtaskstate("waiting to read");
+      fdwait(s->fd, 'r');
+		  dtaskstate("reading");
       // read the max of the requested amount or the readahead amount
       read = read < READAHEAD ? READAHEAD : read;
       buf_t* buf = session_append_alloc(session, read);
       // read, and truncate to the actual read amount
       read = fdread(s->fd, buf->data, buf->size);
-      buf_trim(buf, read);
+      buf_trim(buf, 0, read);
     }
 
-		/* Adjust for protocol bugs */
-		if(m->msg.type == BAD_Tdiscarded)
-			m->msg.type = BAD_Tdiscarded;
-		if(m->msg.type == BAD_Rerr)
-			m->msg.type = Rerr;
+		/* Adjust for protocol bugs (TODO: move to mux.c) */
+		if(m->msg->type == BAD_Tdiscarded)
+			m->msg->type = BAD_Tdiscarded;
+		if(m->msg->type == BAD_Rerr)
+			m->msg->type = Rerr;
 
 		chansendp(s->read_messages, m);
 		dtaskstate("waiting for done signal");
@@ -169,14 +170,16 @@ writetask(void *v)
 	/* args: */
 		Session *s;
 
-  session_t session;
+  session_t* session;
   mux_msg_t* msg;
   void* always_nil;
   buf_t* buf;
+  uint32_t i;
   struct iovec* iovecs;
   uint32_t bufcount;
   size_t wrote;
-  Alt alts[2];
+  int fdwaiting = 0;
+  Alt alts[3];
 
 	void **argv = v;
 	s = argv[0];
@@ -187,13 +190,18 @@ writetask(void *v)
   alts[0].v = &msg;
   alts[1].c = s->fd_writable;
   alts[1].op = CHANRCV;
-  alts[1].v = always_nil;
+  alts[1].v = &always_nil;
+  alts[2].op = CHANEND;
   session = session_create();
 
-	taskname("sessread %s (fd=%d)", s->label, s->fd);
+	taskname("sesswrite %s (fd=%d)", s->label, s->fd);
 
 	while(s->ok){
-		dtaskstate("waiting for fd, or for new message");
+    if (fdwaiting) {
+		  dtaskstate("waiting for fd to be writable, or for a new message");
+    } else {
+		  dtaskstate("waiting for a new message");
+    }
 
     switch (chanalt(alts)) {
     case 0:
@@ -203,27 +211,34 @@ writetask(void *v)
       }
       mux_msg_encode(session, msg);
       mux_msg_destroy(msg);
-      // NB: fallthrough
+      break;
     case 1:
+      // our fdwait returned
+      fdwaiting = 0;
+		  dtaskstate("writing");
+
       // execute a writev that attempts to flush the entire session
       bufcount = session_bufcount(session);
       iovecs = emalloc(sizeof(struct iovec) * bufcount);
-      for (uint32_t i = session->head; i < session->tail; i++) {
+      for (i = session->head; i < session->tail; i++) {
         buf = session_buf(session, session->head + i);
         iovecs[i].iov_base = buf->data;
         iovecs[i].iov_len = buf->size;
       }
-      wrote = writev(iovecs, 0, iovecs.length);
+      wrote = writev(s->fd, iovecs, bufcount);
       free(iovecs);
 
       // drop the written data from the session
-      assert( wrote < (1 << 31) );
+      assert( wrote < ((uint32_t)1 << 31) );
       session_drop(session, (int)wrote);
+      break;
+    }
 
-      // if there is data remaining in the session, request an fdwait (doesn't matter
-      // what we send, as long as it isn't nil)
-      if (session_bufcount(session) > 0)
-        chansendp(s->request_fdwait, &ok);
+    // if there is data in the session, request an fdwait (doesn't matter
+    // what we send, as long as it isn't nil)
+    if (!fdwaiting && session_bufcount(session) > 0) {
+      chansendp(s->request_fdwait, &s->ok);
+      fdwaiting = 1;
     }
 	}
 
@@ -246,19 +261,17 @@ writabletask(void *v)
 	s = argv[0];
 	free(argv);
 
-  void* input;
-
-	taskname("writabletask %s (fd=%d)", s->label, s->fd);
+	taskname("sesswritable %s (fd=%d)", s->label, s->fd);
 
 	while(s->ok){
-		dtaskstate("waiting to be asked to fdwait");
-    if (chanrecvp(i) == nil) break;
+		//dtaskstate("waiting to be asked to fdwait");
+    if (chanrecvp(s->request_fdwait) == nil) break;
 
-		dtaskstate("fdwaiting");
-    fdwait(s->fd, "w");
+		//dtaskstate("fdwaiting");
+    fdwait(s->fd, 'w');
 
-		dtaskstate("sending signal that fd is writable");
-		chansend(o, nil);
+		//dtaskstate("signaling that fd is writable");
+		chansend(s->fd_writable, nil);
 	}
 
 	dtaskstate("exiting");
