@@ -7,7 +7,7 @@ extern int debug;
 enum
 {
 	STACK = 32768,
-	READAHEAD = 1024,
+	READAHEAD = 16 * 1024,
 };
 
 
