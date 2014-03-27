@@ -29,10 +29,14 @@ enum
 	Tping = 65,
 	Rping = -65,
 	
-	Tdiscarded = 66,
-	Tlease = -67,
+/*	Tdiscarded = 66,*/
+/*	Tlease = -67,*/
 	
-	Rerr = -128,
+/*	Rerr = -128,*/
+	Tdiscarded = -62,
+	Tlease = -61,
+
+	Rerr = 127,
 	
 	Unknown = 0
 };
@@ -48,6 +52,7 @@ Tags* mktags(int n);
 void freetags(Tags *t);
 int nexttag(Tags *t, void *p);
 void* puttag(Tags *t, uint tag);
+void* putnexttag(Tags *t);
 
 typedef
 struct Session
@@ -55,12 +60,16 @@ struct Session
 	char label[128];
 	int ok;
 	int fd;
+	
+	int npending;
+	
+	Tags *tags;
+	
+	Channel *callc;
+	Channel *readc;
 } Session;
 
-extern Session *nilsess;
-
-void sessinit();
-Session* sesscreate(int fd, Channel *c, char *fmt, ...);
+Session* sesscreate(int fd, char *fmt, ...);
 void sessfatal(Session *s, char *fmt, ...);
 
 typedef
@@ -74,20 +83,25 @@ struct Muxhdr
 typedef 
 struct Muxmesg
 {
+	Channel *replyc;
+	int savetag;
 	Muxhdr hd;
-	QLock *locked;
-	Session **sp;
+	uchar body[];
 } Muxmesg;
 
 typedef
 struct Stats
 {
 	uint64 nreq;
-	uint64 nsess;
+	uint64 nactivesess;
+	uint64 nlifetimesess;
 } Stats;
 extern Stats stats;
 
 void servestatus(int fd);
 
+void routeadd(Session *sess);
+Session *routelookup();
+void routedel(Session *sess);
 
 void copyframe(Session *dst, Session *src, Muxhdr *hd);

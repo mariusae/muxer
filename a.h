@@ -63,7 +63,7 @@ void _dtaskstate(char *fmt, ...);
 
 void* emalloc(uint n);
 
-int netmunge(char **s);
+int netparse(char *s, char *host, int *port);
 int fdreadn(int fd, void *buf, uint n);
 int fdwritev(int fd, struct iovec *_iov, int iovn);
 int fdprint(int fd, char *fmt, ...);

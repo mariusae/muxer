@@ -117,3 +117,22 @@ puttag(Tags *t, uint tag)
 
 	return p;
 }
+
+void*
+putnexttag(Tags *t)
+{
+	/* This could certainly be done more efficiently. */
+	El *el;
+	void *p;
+	int i;
+
+	for(i=0; i<Nhash; i++)
+	if((el=t->tab[i]) != nil){
+		t->tab[i] = el->next;
+		p = el->p;
+		free(el);
+		return p;
+	}
+
+	return nil;
+}

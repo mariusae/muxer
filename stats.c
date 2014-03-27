@@ -6,7 +6,8 @@ static void writestats(int fd);
 
 Stats stats = {
 	.nreq = 0,
-	.nsess = 0
+	.nactivesess = 0,
+	.nlifetimesess = 0,
 };
 
 static struct {
@@ -14,7 +15,8 @@ static struct {
 	uint64 *vp;
 } stattab[] = {
 	{ "nreq", &stats.nreq },
-	{ "nsess", &stats.nsess }
+	{ "nactivesess", &stats.nactivesess },
+	{ "nlifetimesess", &stats.nlifetimesess }
 };
 
 void

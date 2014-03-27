@@ -14,19 +14,23 @@ emalloc(uint n)
 }
 
 int
-netmunge(char **s)
+netparse(char *s, char *host, int *port)
 {
 	char *p;
 
-	if ((p=index(*s, ':')) == nil)
+	if ((p=index(s, ':')) == nil)
 		return -1;
 
-	if(p==*s)
-		*s = "*";
-	else
+	if(p==s){
+		snprint(host, 64, "*");
+	}else{
 		*p = 0;
-
-	return atoi(&p[1]);
+		strecpy(host, host+64, s);
+		*p = ':';
+	}
+	
+	*port = atoi(&p[1]);
+	return 0;
 }
 
 int
