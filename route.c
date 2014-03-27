@@ -38,6 +38,7 @@ routedel(Session *sess)
 		
 	*rp = r->next;
 	free(r);
+	nroutes--;
 }
 
 Session*

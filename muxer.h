@@ -54,13 +54,24 @@ int nexttag(Tags *t, void *p);
 void* puttag(Tags *t, uint tag);
 void* putnexttag(Tags *t);
 
+enum
+{
+	Sessfd,
+	Sessdial
+};
+
 typedef
 struct Session
 {
 	char label[128];
 	int ok;
 	int fd;
-	
+	int type;
+
+	int dialnet;
+	char *dialhost;
+	int dialport;
+
 	int npending;
 	
 	Tags *tags;
@@ -70,6 +81,7 @@ struct Session
 } Session;
 
 Session* sesscreate(int fd, char *fmt, ...);
+Session* sessdial(int net, char *host, int port, char *fmt, ...);
 void sessfatal(Session *s, char *fmt, ...);
 
 typedef

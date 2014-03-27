@@ -62,6 +62,7 @@ void _dtaskstate(char *fmt, ...);
 #define dtaskstate(...) if(!debug) taskstate(__VA_ARGS__); else {taskstate(__VA_ARGS__); _dtaskstate(__VA_ARGS__); }
 
 void* emalloc(uint n);
+char* estrdup(char *s);
 
 int netparse(char *s, char *host, int *port);
 int fdreadn(int fd, void *buf, uint n);

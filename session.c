@@ -5,13 +5,23 @@
 
 static void readtask(void *v);
 static void brokertask(void *v);
-static void writemesg(Session *s, Muxhdr *hd, uchar *buf);
-static void writeerr(Session *s, uint32 tag, char *fmt, ...);
-Muxmesg* mkerr(uint32 tag, char *fmt, ...);
+static void dialtask(void *v);
+int dial(Session *s);
+
+static void Mwrite(Session *s, Muxmesg *m);
+static void Mwriteerr(Session *s, uint32 tag, char *fmt, ...);
+static Muxmesg* Mverr(uint32 tag, char *fmt, va_list arg);
+static Muxmesg* Merr(uint32 tag, char *fmt, ...);
+
 static void recvt(Session *s, Muxmesg *m);
 static void recvr(Session *s, Muxmesg *m);
 static void callt(Session *s, Muxmesg *m);
 static void callr(Session *s, Muxmesg *m);
+
+enum 
+{
+	Maxredialdelay = 10000
+};
 
 Session*
 sesscreate(int fd, char *fmt, ...)
@@ -22,7 +32,7 @@ sesscreate(int fd, char *fmt, ...)
 	s = emalloc(sizeof(Session));
 	s->fd = fd;
 	s->ok = 1;
-	s->npending = 0;
+	s->type = Sessfd;
 
 	va_start(arg, fmt);
 	vsnprint(s->label, sizeof s->label, fmt, arg);
@@ -32,10 +42,37 @@ sesscreate(int fd, char *fmt, ...)
 	s->readc = chancreate(sizeof(void*), 8);
 	s->tags = mktags(1024);
 
-	dprint("%s: create\n", s->label);
+	dprint("%s: create fd\n", s->label);
 
 	taskcreate(readtask, s, STACK);
 	taskcreate(brokertask, s, STACK);
+
+	return s;
+}
+
+Session*
+sessdial(int net, char *host, int port, char *fmt, ...)
+{
+	Session *s;
+	va_list arg;
+
+	s = emalloc(sizeof(Session));
+	s->type = Sessdial;
+	s->dialnet = net;
+	s->dialhost = estrdup(host);
+	s->dialport = port;
+
+	va_start(arg, fmt);
+	vsnprint(s->label, sizeof s->label, fmt, arg);
+	va_end(arg);
+
+	s->callc = chancreate(sizeof(void*), 8);
+	s->readc = chancreate(sizeof(void*), 8);
+	s->tags = mktags(1024);
+
+	dprint("%s: create dial\n", s->label);
+
+	taskcreate(dialtask, s, STACK);
 
 	return s;
 }
@@ -53,8 +90,41 @@ sessfatal(Session *s, char *fmt, ...)
 	s->ok = 0;
 
 	dprint("session %s failed: %s\n", s->label, buf);
+}
 
-	snprint(s->label, sizeof s->label, "%s [failed: %s]", s->label, buf);
+void
+dialtask(void *v)
+{
+	dial(v);
+
+	taskcreate(readtask, v, STACK);
+	taskcreate(brokertask, v, STACK);
+	routeadd(v);
+}
+
+int
+dial(Session *s)
+{
+	uint delay, n;
+
+	delay = 10;
+	n = 1;
+
+	assert(s->type == Sessdial);
+
+	taskname("%s: dialler", s->label);
+	dtaskstate("attempt #1");
+	while((s->fd = netdial(s->dialnet, s->dialhost, s->dialport)) < 0){
+		dprint("failed to dial: %r - redialling in %dms\n", delay);
+		taskdelay(delay);
+		if((delay *= 2) > Maxredialdelay)
+			delay = Maxredialdelay;
+		dtaskstate("attempt #%d", ++n);
+	}
+	
+	s->ok = 1;
+
+	return 0;
 }
 
 static void
@@ -66,10 +136,12 @@ brokertask(void *v)
 
 	s = v;
 
+begin:
+	taskname("%s broker", s->label);
+
 	stats.nactivesess++;
 	stats.nlifetimesess++;
 	
-	taskname("%s broker", s->label);
 
 	alts[0].c = s->readc;
 	alts[0].v = &m;
@@ -89,7 +161,7 @@ brokertask(void *v)
 			dprint("%s: %c read\n", s->label, m->hd.type>0?'T':'R');
 
 			if(abs(m->hd.type) >= 64)
-				writeerr(s, m->hd.tag, "Unknown control message %d", m->hd.type);
+				Mwriteerr(s, m->hd.tag, "Unknown control message %d", m->hd.type);
 			else if(m->hd.type > 0)
 				recvt(s, m);
 			else
@@ -99,8 +171,9 @@ brokertask(void *v)
 
 		case 1:
 			dprint("%s: %c call\n", s->label, m->hd.type>0?'T':'R');
-	
-			if(m->hd.type > 0)
+			
+			/* Fix up these protocol bugs somewhere. */
+			if(m->hd.type > 0 && m->hd.type != Rerr)
 				callt(s, m);
 			else
 				callr(s, m);
@@ -111,12 +184,14 @@ brokertask(void *v)
 
 hangup:
 	dtaskstate("hangup");
-	snprint(s->label, sizeof s->label, "%s: hangup", s->label);
+
+	/* Save our precious file descriptors. */
+	close(s->fd);
 
 	routedel(s);
 
 	 while((m=putnexttag(s->tags)) != nil){
-		chansendp(m->replyc, mkerr(m->hd.tag, "dest hangup"));
+		chansendp(m->replyc, Merr(m->hd.tag, "dest hangup"));
 		free(m);
 	 }
 	 
@@ -124,11 +199,16 @@ hangup:
 	 	chanrecvp(s->callc);
 
 	stats.nactivesess--;
-	
+
+	if(s->type == Sessdial && dial(s) == 0){
+		routeadd(s);
+		taskcreate(readtask, s, STACK);
+		goto begin;
+	}
+
 	freetags(s->tags);
 	chanfree(s->callc);
 	chanfree(s->readc);
-	close(s->fd);
 	free(s);
 }
 
@@ -140,7 +220,7 @@ recvt(Session *s, Muxmesg *m)
 	if((ds = routelookup()) == nil){
 		/* This probably deserves a first-class application error */
 		dprint("no route for message\n");
-		writeerr(s, m->hd.tag, "Cannot route message");
+		Mwriteerr(s, m->hd.tag, "no route for destination");
 		return;
 	}
 	
@@ -170,24 +250,24 @@ static void
 callt(Session *s, Muxmesg *m)
 {
 	int tag;
-	Muxmesg *errm;
+
+	if(m->replyc == nil) abort();
 
 	if((tag=nexttag(s->tags, m)) < 0){
-		errm = mkerr(m->hd.tag, "muxer tags exhausted");
-		chansendp(m->replyc, errm);
+		chansendp(m->replyc, Merr(m->hd.tag, "muxer tags exhausted"));
 		free(m);
 		return;
 	}
 
 	m->savetag = m->hd.tag;
 	m->hd.tag = tag;
-	writemesg(s, &m->hd, m->body);
+	Mwrite(s, m);
 }
 
 static void
 callr(Session *s, Muxmesg *m)
 {
-	writemesg(s, &m->hd, m->body);
+	Mwrite(s, m);
 	free(m);
 	s->npending--;
 }
@@ -241,54 +321,63 @@ readtask(void *v)
 	chansendp(s->readc, nil);
 }
 
-static void
-writemesg(Session *s, Muxhdr *hd, uchar *buf)
+
+static void 
+Mwrite(Session *s, Muxmesg *m)
 {
 	uchar hdbuf[8];
+	struct iovec iov[2];
 
-	U32PUT(hdbuf, hd->siz+4);
-	hdbuf[4] = hd->type;
-	U24PUT(hdbuf+5, hd->tag);
+	U32PUT(hdbuf, m->hd.siz+4);
+	hdbuf[4] = m->hd.type;
+	U24PUT(hdbuf+5, m->hd.tag);
 
-	/* XXX: fdwritev */
+	iov[0].iov_base = hdbuf;
+	iov[0].iov_len = 8;
+	iov[1].iov_base = m->body;
+	iov[1].iov_len = m->hd.siz;
 
-	fdwrite(s->fd, hdbuf, 8);
-	fdwrite(s->fd, buf, hd->siz);
+	fdwritev(s->fd, iov, 2);
 }
 
-static void
-writeerr(Session *s, uint32 tag, char *fmt, ...)
+static Muxmesg*
+Mverr(uint32 tag, char *fmt, va_list arg)
+{
+	Muxmesg *m;
+
+	m = emalloc(sizeof *m+64);
+	vsnprint((char*)m->body, 64, fmt, arg);
+	m->hd.siz = strlen((char*)m->body)+4;
+	m->hd.type = Rerr;
+	m->hd.tag = tag;
+
+	return m;
+}
+
+
+static Muxmesg* 
+Merr(uint32 tag, char *fmt, ...)
 {
 	va_list arg;
-	char buf[64];
-	Muxhdr hd;
+	Muxmesg *m;
 
 	va_start(arg, fmt);
-	vsnprint(buf, sizeof buf, fmt, arg);
+	m = Mverr(tag, fmt, arg);
 	va_end(arg);
 
-	hd.siz = strlen(buf);
-	hd.type = Rerr;
-	hd.tag = tag;
-
-	writemesg(s, &hd, (uchar*)buf);
+	return m;
 }
 
-Muxmesg*
-mkerr(uint32 tag, char *fmt, ...)
+static void 
+Mwriteerr(Session *s, uint32 tag, char *fmt, ...)
 {
 	va_list arg;
 	Muxmesg *m;
 	
-	m = emalloc(sizeof *m+64);
-
 	va_start(arg, fmt);
-	vsnprint((char*)m->body, 64, fmt, arg);
+	m = Mverr(tag, fmt, arg);
 	va_end(arg);
-
-	m->hd.siz = strlen((char*)m->body)+4;
-	m->hd.type = Rerr;
-	m->hd.tag = tag;
 	
-	return m;
+	Mwrite(s, m);
+	free(m);
 }

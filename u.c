@@ -13,6 +13,17 @@ emalloc(uint n)
 	return p;
 }
 
+char*
+estrdup(char *s)
+{
+	void *d;
+	
+	if((d = strdup(s)) == nil)
+		abort();
+
+	return d;
+}
+
 int
 netparse(char *s, char *host, int *port)
 {

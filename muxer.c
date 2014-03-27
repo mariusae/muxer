@@ -52,11 +52,7 @@ taskmain(int argc, char **argv)
 	}
 	servestatus(sfd);
 
-	if ((fd = netdial(TCP, daddr, dport)) < 0){
-		fprint(2, "dst %s:%d unreachable\n", daddr, dport);
-		taskexitall(1);
-	}
-	routeadd(sesscreate(fd, "%s:%d", daddr, dport));
+	sessdial(TCP, daddr, dport, "%s:%d*", daddr, dport);
 
 	if ((fd = netannounce(TCP, aaddr, aport)) < 0){
 		fprint(2, "announce %s:%d failed: %r\n", aaddr, aport);
