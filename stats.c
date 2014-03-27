@@ -8,6 +8,7 @@ Stats stats = {
 	.nreq = 0,
 	.nactivesess = 0,
 	.nlifetimesess = 0,
+	.nredials = 0,
 };
 
 static struct {
@@ -16,7 +17,8 @@ static struct {
 } stattab[] = {
 	{ "nreq", &stats.nreq },
 	{ "nactivesess", &stats.nactivesess },
-	{ "nlifetimesess", &stats.nlifetimesess }
+	{ "nlifetimesess", &stats.nlifetimesess },
+	{ "nredials", &stats.nredials },
 };
 
 void

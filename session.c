@@ -13,10 +13,11 @@ static void Mwriteerr(Session *s, uint32 tag, char *fmt, ...);
 static Muxmesg* Mverr(uint32 tag, char *fmt, va_list arg);
 static Muxmesg* Merr(uint32 tag, char *fmt, ...);
 
-static void recvt(Session *s, Muxmesg *m);
-static void recvr(Session *s, Muxmesg *m);
-static void callt(Session *s, Muxmesg *m);
-static void callr(Session *s, Muxmesg *m);
+static void Trecv(Session *s, Muxmesg *m);
+static void Rcall(Session *s, Muxmesg *m);
+
+static void Tcall(Session *s, Muxmesg *m);
+static void Rrecv(Session *s, Muxmesg *m);
 
 enum 
 {
@@ -115,6 +116,7 @@ dial(Session *s)
 	taskname("%s: dialler", s->label);
 	dtaskstate("attempt #1");
 	while((s->fd = netdial(s->dialnet, s->dialhost, s->dialport)) < 0){
+		stats.nredials++;
 		dprint("failed to dial: %r - redialling in %dms\n", delay);
 		taskdelay(delay);
 		if((delay *= 2) > Maxredialdelay)
@@ -163,9 +165,9 @@ begin:
 			if(abs(m->hd.type) >= 64)
 				Mwriteerr(s, m->hd.tag, "Unknown control message %d", m->hd.type);
 			else if(m->hd.type > 0)
-				recvt(s, m);
+				Trecv(s, m);
 			else
-				recvr(s, m);
+				Rrecv(s, m);
 
 			break;
 
@@ -174,9 +176,9 @@ begin:
 			
 			/* Fix up these protocol bugs somewhere. */
 			if(m->hd.type > 0 && m->hd.type != Rerr)
-				callt(s, m);
+				Tcall(s, m);
 			else
-				callr(s, m);
+				Rcall(s, m);
 
 			break;
 		}
@@ -213,7 +215,7 @@ hangup:
 }
 
 static void
-recvt(Session *s, Muxmesg *m)
+Trecv(Session *s, Muxmesg *m)
 {
 	Session *ds;
 
@@ -232,7 +234,7 @@ recvt(Session *s, Muxmesg *m)
 }
 
 static void
-recvr(Session *s, Muxmesg *m)
+Rrecv(Session *s, Muxmesg *m)
 {
 	Muxmesg *savem;
 
@@ -247,7 +249,7 @@ recvr(Session *s, Muxmesg *m)
 }
 
 static void
-callt(Session *s, Muxmesg *m)
+Tcall(Session *s, Muxmesg *m)
 {
 	int tag;
 
@@ -265,7 +267,7 @@ callt(Session *s, Muxmesg *m)
 }
 
 static void
-callr(Session *s, Muxmesg *m)
+Rcall(Session *s, Muxmesg *m)
 {
 	Mwrite(s, m);
 	free(m);

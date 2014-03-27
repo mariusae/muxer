@@ -107,6 +107,7 @@ struct Stats
 	uint64 nreq;
 	uint64 nactivesess;
 	uint64 nlifetimesess;
+	uint64 nredials;
 } Stats;
 extern Stats stats;
 
