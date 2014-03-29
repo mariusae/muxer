@@ -109,7 +109,7 @@ dial(Session *s)
 	uint delay, n;
 
 	delay = 10;
-	n = 1;
+	n = 2;
 
 	assert(s->type == Sessdial);
 
@@ -121,7 +121,7 @@ dial(Session *s)
 		taskdelay(delay);
 		if((delay *= 2) > Maxredialdelay)
 			delay = Maxredialdelay;
-		dtaskstate("attempt #%d", ++n);
+		dtaskstate("attempt #%d", n++);
 	}
 	
 	s->ok = 1;
@@ -290,10 +290,10 @@ readtask(void *v)
 		dtaskstate("reading frame header");
 
 		if((n=fdreadn(s->fd, hd, 8)) < 0){
-			sessfatal(s, "while reading header: %r");
+			sessfatal(s, "%r while reading header");
 			break;
 		} else if(n!=8){
-			sessfatal(s, "EOF");
+			sessfatal(s, "EOF while readin gheader");
 			break;
 		}
 
