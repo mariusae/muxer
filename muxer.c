@@ -8,14 +8,14 @@ int debug = 0;
 void
 usage()
 {
-	fprint(2, "usage: %s [-a announceaddr] [-s statsaddr] [-D] destaddr\n", argv0);
+	fprint(2, "usage: %s [-a announceaddr] [-s statsaddr] [-D] destinations...\n", argv0);
 	taskexitall(1);
 }
 
 void
 taskmain(int argc, char **argv)
 {
-	int fd, cfd, sfd, aport, dport, port, sport;
+	int fd, cfd, sfd, aport, dport, port, sport, i;
 	char aaddr[64], daddr[64], saddr[64], peer[16];
 	
 	snprint(aaddr, sizeof aaddr, "*");
@@ -40,19 +40,18 @@ taskmain(int argc, char **argv)
 		usage();
 	}ARGEND
 
-	if(argc != 1)
-		usage();
-
-	if(netparse(argv[0], daddr, &dport) < 0)
-		usage();
-
 	if((sfd = netannounce(TCP, saddr, sport)) < 0){
 		fprint(2, "announce %s:%d failed: %r\n", saddr, sport);
 		taskexitall(1);
 	}
 	servestatus(sfd);
+	
+	for(i=0; i<argc; i++){
+		if(netparse(argv[i], daddr, &dport) < 0)
+			usage();
 
-	sessdial(TCP, daddr, dport, "%s:%d*", daddr, dport);
+		sessdial(TCP, daddr, dport, "%s:%d*", daddr, dport);
+	}
 
 	if ((fd = netannounce(TCP, aaddr, aport)) < 0){
 		fprint(2, "announce %s:%d failed: %r\n", aaddr, aport);

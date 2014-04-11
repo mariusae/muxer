@@ -10,7 +10,7 @@ struct Route
 };
 
 static Route *routes = nil;
-static int nroutes = 0;
+static Route *nextroute = nil;
 
 void
 routeadd(Session *sess)
@@ -21,37 +21,37 @@ routeadd(Session *sess)
 	r->sess = sess;
 	r->next = routes;
 	routes = r;
-	nroutes++;
+	nextroute = nil;
 }
 
 void
 routedel(Session *sess)
 {
 	Route **rp, *r;
-	
+
 	rp = &routes;
 	for(rp=&routes; *rp!=nil && (*rp)->sess!=sess; rp=&(*rp)->next)
 		;
 
 	if((r=*rp) == nil)
 		return;
-		
+
 	*rp = r->next;
 	free(r);
-	nroutes--;
+	nextroute = nil;
 }
 
 Session*
 routelookup()
 {
-	int i;
 	Route *r;
-	
-	if(routes == nil)
+
+	if(nextroute == nil)
+		nextroute = routes;
+
+	if((r = nextroute) == nil)
 		return nil;
 
-	for(i = rand() % nroutes, r = routes; i>0; i--)
-		r = r->next;
-
+	nextroute = nextroute->next;
 	return r->sess;
 }
