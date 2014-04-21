@@ -3,11 +3,11 @@
 #include <task.h>
 #include <fcntl.h>
 
-static void readtask(void *v);
 static void brokertask(void *v);
 static void dialtask(void *v);
 int dial(Session *s);
 
+static Muxmesg* Mread(Session *s);
 static void Mwrite(Session *s, Muxmesg *m);
 static void Mwriteerr(Session *s, uint32 tag, char *fmt, ...);
 static Muxmesg* Mverr(uint32 tag, char *fmt, va_list arg);
@@ -40,12 +40,12 @@ sesscreate(int fd, char *fmt, ...)
 	va_end(arg);
 	
 	s->callc = chancreate(sizeof(void*), 8);
-	s->readc = chancreate(sizeof(void*), 8);
+	s->rnotify = chancreate(sizeof(unsigned long), 2);
+	s->wnotify = chancreate(sizeof(unsigned long), 2);
 	s->tags = mktags(1024);
 
 	dprint("%s: create fd\n", s->label);
 
-	taskcreate(readtask, s, STACK);
 	taskcreate(brokertask, s, STACK);
 
 	return s;
@@ -68,7 +68,8 @@ sessdial(int net, char *host, int port, char *fmt, ...)
 	va_end(arg);
 
 	s->callc = chancreate(sizeof(void*), 8);
-	s->readc = chancreate(sizeof(void*), 8);
+	s->rnotify = chancreate(sizeof(unsigned long), 2);
+	s->wnotify = chancreate(sizeof(unsigned long), 2);
 	s->tags = mktags(1024);
 
 	dprint("%s: create dial\n", s->label);
@@ -98,7 +99,6 @@ dialtask(void *v)
 {
 	dial(v);
 
-	taskcreate(readtask, v, STACK);
 	taskcreate(brokertask, v, STACK);
 	routeadd(v);
 }
@@ -133,7 +133,10 @@ static void
 brokertask(void *v)
 {
 	Session *s;
-	Muxmesg *m;
+	Muxmesg *mread;
+	Muxmesg *mtowrite;
+	unsigned long unused;
+	int writewaiting;
 	Alt alts[3];
 
 	s = v;
@@ -144,41 +147,78 @@ begin:
 	stats.nactivesess++;
 	stats.nlifetimesess++;
 	
-
-	alts[0].c = s->readc;
-	alts[0].v = &m;
+	alts[0].c = s->rnotify;
+	alts[0].v = &unused;
 	alts[0].op = CHANRCV;
-	alts[1].c = s->callc;
-	alts[1].v = &m;
 	alts[1].op = CHANRCV;
 	alts[2].op = CHANEND;
 
+// we always alt for `rnotify`, but depending on whether we have an outbound message,
+// WWAIT and CWAIT will toggle between alting for `wnotify` and `callc` respectively
+// TODO: this can all be replaced by the session buffering
+#define WWAIT() do {	\
+	alts[1].c = s->wnotify;	\
+	alts[1].v = &unused;	\
+	writewaiting = 1;	\
+	fdnotify(s->fd, 'w', s->wnotify);	\
+} while(0)
+
+#define CWAIT() do {	\
+	alts[1].c = s->callc;	\
+	alts[1].v = &mtowrite;	\
+	writewaiting = 0;	\
+} while(0)
+
+	// begin the (indefinite) fdnotify for rnotify, and initially wait for calls
+	printf("requesting rnotify\n");
+	fdnotify(s->fd, 'r', s->rnotify);
+	CWAIT();
+
 	for(;;){
-		dtaskstate("read||call");
+		if (writewaiting) {
+			dtaskstate("read||write");
+		} else {
+			dtaskstate("read||call");
+		}
 		switch(chanalt(alts)){
 		case 0:
-			if(m == nil)
+			dtaskstate("reading");
+			// TODO: blocking/fdwaiting read
+			mread = Mread(s);
+			if(mread == nil)
 				goto hangup;
 
-			dprint("%s: %c read\n", s->label, m->hd.type>0?'T':'R');
+			dprint("%s: %c read\n", s->label, mread->hd.type>0?'T':'R');
 
-			if(abs(m->hd.type) >= 64)
-				Mwriteerr(s, m->hd.tag, "Unknown control message %d", m->hd.type);
-			else if(m->hd.type > 0)
-				Trecv(s, m);
+			if(abs(mread->hd.type) >= 64)
+				Mwriteerr(s, mread->hd.tag, "Unknown control message %d", mread->hd.type);
+			else if(mread->hd.type > 0)
+				Trecv(s, mread);
 			else
-				Rrecv(s, m);
+				Rrecv(s, mread);
 
+			// resume fdnotify for reads
+			fdnotify(s->fd, 'r', s->rnotify);
 			break;
 
 		case 1:
-			dprint("%s: %c call\n", s->label, m->hd.type>0?'T':'R');
-			
-			/* Fix up these protocol bugs somewhere. */
-			if(m->hd.type > 0 && m->hd.type != Rerr)
-				Tcall(s, m);
-			else
-				Rcall(s, m);
+			if (writewaiting) {
+				// fd is writable: execute call
+				dprint("%s: %c writing\n", s->label, mtowrite->hd.type>0?'T':'R');
+
+				/* Fix up these protocol bugs somewhere. */
+				if(mtowrite->hd.type > 0 && mtowrite->hd.type != Rerr)
+					Tcall(s, mtowrite);
+				else
+					Rcall(s, mtowrite);
+
+				// message flushed: begin waiting for calls again
+				CWAIT();
+			} else {
+				// received a call: buffer it in-place and wait to become writable
+				dprint("%s: %c call\n", s->label, mtowrite->hd.type>0?'T':'R');
+				WWAIT();
+			}
 
 			break;
 		}
@@ -192,9 +232,9 @@ hangup:
 
 	routedel(s);
 
-	 while((m=putnexttag(s->tags)) != nil){
-		chansendp(m->replyc, Merr(m->hd.tag, "dest hangup"));
-		free(m);
+	 while((mtowrite=putnexttag(s->tags)) != nil){
+		chansendp(mtowrite->replyc, Merr(mtowrite->hd.tag, "dest hangup"));
+		free(mtowrite);
 	 }
 	 
 	 while(s->npending-- > 0)
@@ -204,13 +244,14 @@ hangup:
 
 	if(s->type == Sessdial && dial(s) == 0){
 		routeadd(s);
-		taskcreate(readtask, s, STACK);
 		goto begin;
 	}
 
 	freetags(s->tags);
 	chanfree(s->callc);
-	chanfree(s->readc);
+	// TODO: need the ability to cancel fdnotify in order to handle freeing these safely
+	// chanfree(s->rnotify);
+	// chanfree(s->wnotify);
 	free(s);
 }
 
@@ -274,53 +315,51 @@ Rcall(Session *s, Muxmesg *m)
 	s->npending--;
 }
 
-static void
-readtask(void *v)
+/*
+ * Executes blocking/fdwaiting reads to fetch a Muxmesg for the given session.
+ * If this method returns nil, the session has already been marked !ok.
+ *
+ * TODO: need to incorporate session_t to eliminate the fdwaits here
+ */
+static Muxmesg*
+Mread(Session *s)
 {
-	Session *s;
 	uchar hd[8];
 	Muxmesg *m;
 	int n;
 
-	s = v;
+	dtaskstate("reading frame header");
 
-	taskname("%s read", s->label);
-
-	while(s->ok){
-		dtaskstate("reading frame header");
-
-		if((n=fdreadn(s->fd, hd, 8)) < 0){
-			sessfatal(s, "%r while reading header");
-			break;
-		} else if(n!=8){
-			sessfatal(s, "EOF while readin gheader");
-			break;
-		}
-
-		n = U32GET(hd)-4;
-		m = emalloc(sizeof *m + n);
-		m->hd.siz = n;
-		m->hd.type = (char)hd[4];
-		m->hd.tag = U24GET(hd+5);
-		m->replyc = nil;
-
-/* Adjust for protocol bugs
-		if(m->hd.type == -62)
-			m->hd.type = 66;
-		if(m->hd.type == 127)
-			m->hd.type = -128;
-*/
-
-		dtaskstate("reading frame body");
-		if(fdreadn(s->fd, m->body, n) < n){
-			sessfatal(s, "while reading body: %r");
-			break;
-		}
-
-		chansendp(s->readc, m);
+	if((n=fdreadn(s->fd, hd, 8)) < 0){
+		sessfatal(s, "%r while reading header");
+		return nil;
+	} else if(n!=8){
+		sessfatal(s, "EOF while reading header");
+		return nil;
 	}
 
-	chansendp(s->readc, nil);
+	n = U32GET(hd)-4;
+	m = emalloc(sizeof *m + n);
+	m->hd.siz = n;
+	m->hd.type = (char)hd[4];
+	m->hd.tag = U24GET(hd+5);
+	m->replyc = nil;
+
+/* Adjust for protocol bugs
+	if(m->hd.type == -62)
+		m->hd.type = 66;
+	if(m->hd.type == 127)
+		m->hd.type = -128;
+*/
+
+	dtaskstate("reading frame body");
+	if(fdreadn(s->fd, m->body, n) < n){
+		sessfatal(s, "while reading body: %r");
+		free(m);
+		return nil;
+	}
+
+	return m;
 }
 
 

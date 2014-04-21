@@ -77,7 +77,8 @@ struct Session
 	Tags *tags;
 	
 	Channel *callc;
-	Channel *readc;
+	Channel *rnotify;
+	Channel *wnotify;
 } Session;
 
 Session* sesscreate(int fd, char *fmt, ...);
