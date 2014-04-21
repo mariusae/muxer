@@ -94,6 +94,7 @@ int	taskwakeupall(Rendez*);
 typedef struct Alt Alt;
 typedef struct Altarray Altarray;
 typedef struct Channel Channel;
+typedef struct FDWaiter FDWaiter;
 
 enum
 {
@@ -132,6 +133,15 @@ struct Channel
 	char		*name;
 };
 
+struct FDWaiter	/* used internally */
+{
+	int type; // 0 for task, 1 for chan
+	union waiter {
+		Task	*task;
+		Channel	*chan;
+	} waiter;
+};
+
 int		chanalt(Alt *alts);
 Channel*	chancreate(int elemsize, int elemcnt);
 void		chanfree(Channel *c);
@@ -156,6 +166,11 @@ int		fdread(int, void*, int);
 int		fdread1(int, void*, int);	/* always uses fdwait */
 int		fdwrite(int, void*, int);
 void		fdwait(int, int);
+/*
+ * non-blocking variant of fdwait that requests notification for the given event on
+ * the given Channel. The Channel will receive the effected fd via a channbsendul
+ */
+void		fdnotify(int, int, Channel*);
 int		fdnoblock(int);
 
 void		fdtask(void*);

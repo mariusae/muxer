@@ -8,7 +8,7 @@ enum
 };
 
 static struct pollfd pollfd[MAXFD];
-static Task *polltask[MAXFD];
+static FDWaiter pollwaiter[MAXFD];
 static int npollfd;
 static int startedfdtask;
 static Tasklist sleeping;
@@ -53,10 +53,18 @@ fdtask(void *v)
 		/* wake up the guys who deserve it */
 		for(i=0; i<npollfd; i++){
 			while(i < npollfd && pollfd[i].revents){
-				taskready(polltask[i]);
+				switch(pollwaiter[i].type){
+				case 0:
+					taskready(pollwaiter[i].waiter.task);
+					break;
+				case 1:
+					// TODO: return val could indicate full channel
+					channbsendul(pollwaiter[i].waiter.chan, pollfd[i].fd);
+					break;
+				}
 				--npollfd;
 				pollfd[i] = pollfd[npollfd];
-				polltask[i] = polltask[npollfd];
+				pollwaiter[i] = pollwaiter[npollfd];
 			}
 		}
 		
@@ -112,8 +120,9 @@ taskdelay(uint ms)
 	return (nsec() - now)/1000000;
 }
 
-void
-fdwait(int fd, int rw)
+/* Create an FDWaiter for the given fd, where waiter is either a Task* or Channel*. */
+static void
+_addfdwaiter(int fd, int rw, int type, void* waiter)
 {
 	int bits;
 
@@ -127,7 +136,6 @@ fdwait(int fd, int rw)
 		abort();
 	}
 	
-	taskstate("fdwait for %s", rw=='r' ? "read" : rw=='w' ? "write" : "error");
 	bits = 0;
 	switch(rw){
 	case 'r':
@@ -138,12 +146,33 @@ fdwait(int fd, int rw)
 		break;
 	}
 
-	polltask[npollfd] = taskrunning;
+	pollwaiter[npollfd].type = type;
+	switch(type){
+		case 0:
+			pollwaiter[npollfd].waiter.task = (Task*)waiter;
+			break;
+		case 1:
+			pollwaiter[npollfd].waiter.chan = (Channel*)waiter;
+			break;
+	}
 	pollfd[npollfd].fd = fd;
 	pollfd[npollfd].events = bits;
 	pollfd[npollfd].revents = 0;
 	npollfd++;
+}
+
+void
+fdwait(int fd, int rw)
+{
+	taskstate("fdwait for %s", rw=='r' ? "read" : rw=='w' ? "write" : "error");
+	_addfdwaiter(fd, rw, 0, taskrunning);
 	taskswitch();
+}
+
+void
+fdnotify(int fd, int rw, Channel* c)
+{
+	_addfdwaiter(fd, rw, 1, c);
 }
 
 /* Like fdread but always calls fdwait before reading. */
